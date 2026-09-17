@@ -1,6 +1,6 @@
 # 日本株ルールベース銘柄判定ツール（CSV出力版）
 
-J-Quants API から日足を取得し、移動平均・RSI・出来高比率・PER/PBR を計算して
+yfinance 経由で日足を取得し、移動平均・RSI・出来高比率・PER/PBR を計算して
 **買い候補 / 売り候補 / 様子見** を判定、結果を CSV に書き出す単体スクリプトです。
 
 > ⚠️ これは投資助言ではなく、あらかじめ決めたルールに機械的に当てはめるだけのスクリーニング補助ツールです。
@@ -11,8 +11,8 @@ J-Quants API から日足を取得し、移動平均・RSI・出来高比率・P
 | --- | --- |
 | `screener.py` | 本体（取得・計算・判定・CSV出力を1ファイルに集約） |
 | `watchlist.json` | ウォッチリスト（銘柄コードの配列） |
-| `requirements.txt` | 依存ライブラリ（`requests` のみ） |
-| `tests/test_screener.py` | 指標計算・判定ロジックのテスト（API認証情報なしで実行可） |
+| `requirements.txt` | 依存ライブラリ（`yfinance` / `pandas`） |
+| `tests/test_screener.py` | 指標計算・判定・取得層・CLI通しのテスト（ネットワーク不要） |
 | `output/` | CSV の既定出力先（実行時に自動生成） |
 
 ## セットアップ
@@ -21,22 +21,8 @@ J-Quants API から日足を取得し、移動平均・RSI・出来高比率・P
 pip install -r requirements.txt
 ```
 
-[J-Quants](https://jpx-jquants.com/) に登録し、認証情報を環境変数に設定します。
-以下のいずれか1組でOK（上から優先）:
-
-| 環境変数 | 説明 |
-| --- | --- |
-| `JQUANTS_ID_TOKEN` | IDトークン直指定（有効期間 24時間） |
-| `JQUANTS_REFRESH_TOKEN` | リフレッシュトークン（有効期間 1週間） |
-| `JQUANTS_MAIL_ADDRESS` + `JQUANTS_PASSWORD` | 登録メール/パスワードからトークンを自動取得 |
-
-```bash
-export JQUANTS_MAIL_ADDRESS="you@example.com"
-export JQUANTS_PASSWORD="********"
-```
-
-将来 GitHub Actions で毎朝実行する場合は、同じ名前で Repository secrets に登録し、
-ジョブの `env:` に渡すだけで動きます（コード側の変更は不要）。
+**APIキーの登録は不要です。** yfinance は Yahoo Finance から直接取得するため、
+アカウント登録もトークン管理もありません（GitHub Actions でも Secrets 設定が不要）。
 
 ## 使い方
 
@@ -46,11 +32,13 @@ python screener.py --codes 7203 6758        # 銘柄コードを直接指定
 python screener.py --watchlist my_list.json # 別のウォッチリストを使う
 python screener.py --output result.csv      # 出力先を指定
 python screener.py --date 2025-06-30        # 基準日を指定（その日までのデータで判定）
-python screener.py --no-fundamentals        # PER/PBR の取得をスキップ（API呼び出し削減）
+python screener.py --no-fundamentals        # 銘柄名・PER/PBR をスキップ（通信量を半減）
+python screener.py --interval 2.0           # 呼び出し間隔を延ばす（429が出るとき）
 python screener.py --verbose                # 取得本数などの詳細を表示
 ```
 
-銘柄コードは4桁（`7203`）でも J-Quants 形式の5桁（`72030`）でも受け付けます。
+銘柄コードは4桁（`7203`）で指定すれば自動で `7203.T` に変換されます。
+`7203.T` 形式での直接指定も可能です（東証以外は `TICKER_SUFFIX` を変更）。
 
 ### ウォッチリスト
 
@@ -88,6 +76,7 @@ BUY_RSI_MIN, BUY_RSI_MAX = 30.0, 60.0
 BUY_VOLUME_RATIO_MIN = 1.5
 SELL_RSI_MIN = 70.0
 HISTORY_ROWS = 90             # 指標計算に使う日足の本数
+REQUEST_INTERVAL_SEC = 1.0    # 呼び出し間隔（429対策）
 ```
 
 ## 出力 CSV の列
@@ -96,11 +85,11 @@ HISTORY_ROWS = 90             # 指標計算に使う日足の本数
 | --- | --- |
 | `code` / `name` | 銘柄コード（4桁）/ 銘柄名 |
 | `date` | 判定基準日（取得できた最新営業日） |
-| `open` / `close` / `volume` | 始値 / 終値 / 出来高 |
+| `open` / `close` / `volume` | 始値 / 終値 / 出来高（分割・配当調整後） |
 | `ma5` / `ma25` / `ma75` | 移動平均線 |
 | `rsi14` | RSI（Wilder方式） |
 | `volume_avg20` / `volume_ratio` | 過去20日平均出来高 / 当日比率 |
-| `per` / `pbr` | 直近開示の EPS・BPS と終値から算出（取得できない場合は空欄） |
+| `per` / `pbr` | `trailingPE` / `priceToBook`（取得できない場合や0以下は空欄） |
 | `judgement` | 買い候補 / 売り候補 / 様子見 / 判定不可 |
 | `reason` | 判定理由 |
 
@@ -112,19 +101,31 @@ HISTORY_ROWS = 90             # 指標計算に使う日足の本数
 python -m unittest discover -s tests -v
 ```
 
-API 認証情報なしで、移動平均・RSI・出来高比率・クロス検出・判定分岐・CSV出力を検証します。
+ネットワークに接続せず（ダミーのデータソースを差し込んで）、移動平均・RSI・出来高比率・
+クロス検出・判定分岐・リトライ・CSV出力・CLI通しまでを検証します。
 
-## 仕様上の注意
+## yfinance を使ううえでの注意
 
-- **無料プランのデータは約12週間遅延します。** したがって「当日」とは「取得できた最新営業日」を指します。
-  リアルタイム判定が必要になった段階で有料プランへの切り替えを検討してください。
-- 株式分割の影響を避けるため、調整後値（`AdjustmentClose` 等）を優先して使用します。
-- J-Quants には PER/PBR そのものの API がないため、財務諸表の EPS・BPS と終値から算出しています
-  （EPS/BPS が取得できない、または0以下の場合は空欄）。
-- 1銘柄あたり最大3回（日足 / 銘柄情報 / 財務）API を呼びます。無料プランのレート制限に配慮して
-  呼び出し間に 0.2 秒の間隔を入れています（`API_INTERVAL_SEC`）。
+- **非公式ライブラリです。** Yahoo Finance 側の仕様変更で突然動かなくなる可能性があります。
+  「取れない日がある」前提で運用してください（取得失敗は `判定不可` として CSV に残ります）。
+- **株価は約15分遅延**します。ザラ場中のリアルタイム判定には向きません。
+- **レート制限に注意。** 短時間に大量リクエストを送ると 429 で弾かれ、IPが一時ブロックされることがあります。
+  銘柄数が増えたら `--interval` を長めに（2〜3秒）してください。
+- yfinance はレート制限時に**例外ではなく空データを返す**ことがあるため、空データもリトライ対象にしています
+  （`MAX_RETRIES` / `RETRY_BACKOFF_SEC`）。
+- 1銘柄あたり最大2回（日足 / 銘柄情報）通信します。`--no-fundamentals` で1回に減らせます。
+- yfinance は研究・個人利用が想定範囲です。取得データの再配布は想定外の用途にあたります。
+
+## データソースを差し替えたくなったら
+
+取得層は `YFinanceSource` に閉じ込めてあり、`fetch_bars()` / `fetch_profile()` の2つだけ
+実装すれば他のデータソースに差し替えられます（`ticker_factory` を渡せばテスト用ダミーにも置換可能）。
+
+JPX公式の J-Quants API は無料プランだと**約12週間のデータ遅延**と**5リクエスト/分**の制限があるため、
+毎朝の運用には向きませんが、正確な財務データが必要になった場合の候補になります
+（V2 から `x-api-key` ヘッダーによるAPIキー方式。V1は2026年6月1日に終了済み）。
 
 ## 今後の拡張予定
 
 1. Google Sheets API 連携（`write_csv()` と同じ `Result` を書き出し先だけ差し替える想定）
-2. GitHub Actions による毎朝の定時実行（認証は環境変数のため対応済み）
+2. GitHub Actions による毎朝の定時実行（APIキー不要のため Secrets 設定も不要）

@@ -6,7 +6,9 @@
     python -m unittest discover -s tests -v
 """
 
+import contextlib
 import csv
+import io
 import os
 import sys
 import tempfile
@@ -20,6 +22,13 @@ import screener as sc  # noqa: E402
 # 最終日にゴールデンクロス / デッドクロスが成立する検証用の終値系列
 GOLDEN_CROSS_CLOSES = [100.0 - i * 0.3 for i in range(80)] + [140.0]
 DEAD_CROSS_CLOSES = [100.0 + i * 1.0 for i in range(80)] + [100.0]
+
+# 「下落トレンドが底打ちし、緩やかに戻して最終日にゴールデンクロス」という
+# 買い候補の3条件（GC / RSI 30〜60 / 出来高1.5倍以上）が揃う現実的な値動き
+BUY_SIGNAL_CLOSES = (
+    [100.0 - 0.5 * i for i in range(85)]
+    + [100.0 - 0.5 * 84 + 0.5 * j for j in range(1, 10)]
+)
 
 
 def build_bars(closes, volumes=None):
@@ -107,32 +116,6 @@ class TestCrossState(unittest.TestCase):
 
     def test_none_when_not_enough_data(self):
         self.assertIsNone(sc.cross_state([100.0] * 10, 5, 25))
-
-
-class TestValuation(unittest.TestCase):
-    def test_per_and_pbr_from_latest_statement(self):
-        statements = [
-            {"DisclosedDate": "2024-05-10", "EarningsPerShare": "50", "BookValuePerShare": "500"},
-            {"DisclosedDate": "2025-05-10", "EarningsPerShare": "100", "BookValuePerShare": "1000"},
-        ]
-        per, pbr = sc.calc_valuation(statements, close=1500.0)
-        self.assertAlmostEqual(per, 15.0)
-        self.assertAlmostEqual(pbr, 1.5)
-
-    def test_falls_back_to_older_statement_when_value_missing(self):
-        statements = [
-            {"DisclosedDate": "2024-05-10", "EarningsPerShare": "100", "BookValuePerShare": "1000"},
-            {"DisclosedDate": "2025-05-10", "EarningsPerShare": "", "BookValuePerShare": ""},
-        ]
-        per, pbr = sc.calc_valuation(statements, close=1500.0)
-        self.assertAlmostEqual(per, 15.0)
-        self.assertAlmostEqual(pbr, 1.5)
-
-    def test_returns_none_when_unavailable(self):
-        self.assertEqual(sc.calc_valuation([], close=1500.0), (None, None))
-        # 赤字（EPS<=0）は PER を出さない
-        per, _ = sc.calc_valuation([{"EarningsPerShare": "-20"}], close=1500.0)
-        self.assertIsNone(per)
 
 
 def make_indicators(cross=None, rsi_value=45.0, ratio=2.0, close=1000.0):
@@ -230,38 +213,62 @@ class TestBuildIndicators(unittest.TestCase):
         self.assertIsNone(sc.build_indicators([]))
 
 
-class TestParseBars(unittest.TestCase):
-    def test_prefers_adjustment_values(self):
-        rows = [{
-            "Date": "2025-01-06", "Open": 100, "Close": 110, "Volume": 5000,
-            "AdjustmentOpen": 50, "AdjustmentClose": 55, "AdjustmentVolume": 10000,
-        }]
-        bar = sc.parse_bars(rows)[0]
-        self.assertEqual((bar.open, bar.close, bar.volume), (50.0, 55.0, 10000.0))
+class TestBarsFromDataFrame(unittest.TestCase):
+    """yfinance の DataFrame -> Bar 変換。"""
 
-    def test_falls_back_to_raw_values(self):
-        rows = [{"Date": "2025-01-06", "Open": 100, "Close": 110, "Volume": 5000,
-                 "AdjustmentClose": None}]
-        bar = sc.parse_bars(rows)[0]
-        self.assertEqual((bar.open, bar.close, bar.volume), (100.0, 110.0, 5000.0))
+    @staticmethod
+    def frame(rows):
+        import pandas as pd
+        index = pd.to_datetime([r[0] for r in rows])
+        return pd.DataFrame(
+            {"Open": [r[1] for r in rows],
+             "Close": [r[2] for r in rows],
+             "Volume": [r[3] for r in rows]},
+            index=index,
+        )
 
-    def test_skips_rows_without_close(self):
-        rows = [{"Date": "2025-01-06", "Close": None, "AdjustmentClose": None},
-                {"Date": "2025-01-07", "Close": 110}]
-        bars = sc.parse_bars(rows)
+    def test_converts_rows(self):
+        bars = sc.bars_from_dataframe(self.frame([
+            ("2025-06-02", 100.0, 110.0, 5000.0),
+            ("2025-06-03", 111.0, 115.0, 6000.0),
+        ]))
+        self.assertEqual([b.date for b in bars], ["2025-06-02", "2025-06-03"])
+        self.assertEqual((bars[0].open, bars[0].close, bars[0].volume), (100.0, 110.0, 5000.0))
+
+    def test_skips_rows_with_nan_close(self):
+        bars = sc.bars_from_dataframe(self.frame([
+            ("2025-06-02", 100.0, float("nan"), 5000.0),
+            ("2025-06-03", 111.0, 115.0, 6000.0),
+        ]))
         self.assertEqual(len(bars), 1)
-        self.assertEqual(bars[0].date, "2025-01-07")
+        self.assertEqual(bars[0].date, "2025-06-03")
+
+    def test_until_filters_future_rows(self):
+        import datetime as dt
+        bars = sc.bars_from_dataframe(self.frame([
+            ("2025-06-02", 100.0, 110.0, 5000.0),
+            ("2025-06-03", 111.0, 115.0, 6000.0),
+            ("2025-06-04", 116.0, 120.0, 7000.0),
+        ]), until=dt.date(2025, 6, 3))
+        self.assertEqual([b.date for b in bars], ["2025-06-02", "2025-06-03"])
+
+    def test_empty_frame(self):
+        self.assertEqual(sc.bars_from_dataframe(None), [])
+        self.assertEqual(sc.bars_from_dataframe(self.frame([])), [])
 
 
-class TestCodeNormalization(unittest.TestCase):
-    def test_normalize(self):
-        self.assertEqual(sc.normalize_code("7203"), "72030")
-        self.assertEqual(sc.normalize_code("72030"), "72030")
-        self.assertEqual(sc.normalize_code(" 130a "), "130A0")
+class TestTicker(unittest.TestCase):
+    def test_to_ticker(self):
+        self.assertEqual(sc.to_ticker("7203"), "7203.T")
+        self.assertEqual(sc.to_ticker(" 6758 "), "6758.T")
+        self.assertEqual(sc.to_ticker("7203.T"), "7203.T")
+        self.assertEqual(sc.to_ticker("130a"), "130A.T")
+        self.assertEqual(sc.to_ticker("72030"), "7203.T")  # J-Quants形式の5桁にも対応
 
-    def test_display(self):
-        self.assertEqual(sc.display_code("72030"), "7203")
+    def test_display_code(self):
+        self.assertEqual(sc.display_code("7203.T"), "7203")
         self.assertEqual(sc.display_code("7203"), "7203")
+        self.assertEqual(sc.display_code("72030"), "7203")
 
 
 class TestCsvOutput(unittest.TestCase):
@@ -317,6 +324,189 @@ class TestWatchlist(unittest.TestCase):
     def test_missing_file_raises(self):
         with self.assertRaises(FileNotFoundError):
             sc.load_watchlist("/nonexistent/watchlist.json")
+
+
+class FakeTicker:
+    """yfinance.Ticker のダミー。指定した終値・出来高から日足フレームを作る。"""
+
+    def __init__(self, closes, volumes=None, info=None, fail_times=0, empty=False):
+        self.closes = closes
+        self.volumes = volumes if volumes is not None else [1000.0] * len(closes)
+        self._info = info if info is not None else {}
+        self.fail_times = fail_times
+        self.empty = empty
+        self.history_calls = 0
+        self.info_calls = 0
+
+    def history(self, **kwargs):
+        import pandas as pd
+        self.history_calls += 1
+        if self.history_calls <= self.fail_times:
+            raise RuntimeError("429 Too Many Requests")
+        if self.empty:
+            return pd.DataFrame()
+        import datetime as dt
+        base = dt.date(2025, 1, 6)
+        index = pd.to_datetime([base + dt.timedelta(days=i) for i in range(len(self.closes))])
+        return pd.DataFrame(
+            {"Open": [c - 1 for c in self.closes],
+             "Close": list(self.closes),
+             "Volume": list(self.volumes)},
+            index=index,
+        )
+
+    @property
+    def info(self):
+        self.info_calls += 1
+        return self._info
+
+
+class TestYFinanceSource(unittest.TestCase):
+    """取得層（リトライ・キャッシュ・PER/PBR 抽出）。"""
+
+    def make_source(self, tickers):
+        return sc.YFinanceSource(ticker_factory=lambda t: tickers[t],
+                                 interval_sec=0, max_retries=3, backoff_sec=0)
+
+    def test_fetch_bars(self):
+        fake = FakeTicker([100.0, 101.0, 102.0])
+        bars = self.make_source({"7203.T": fake}).fetch_bars("7203.T")
+        self.assertEqual([b.close for b in bars], [100.0, 101.0, 102.0])
+
+    def test_ticker_object_is_reused(self):
+        fake = FakeTicker([100.0, 101.0])
+        source = self.make_source({"7203.T": fake})
+        source.fetch_bars("7203.T")
+        source.fetch_profile("7203.T")
+        self.assertEqual(len(source._cache), 1)
+
+    def test_retries_then_succeeds(self):
+        fake = FakeTicker([100.0, 101.0], fail_times=2)
+        bars = self.make_source({"7203.T": fake}).fetch_bars("7203.T")
+        self.assertEqual(fake.history_calls, 3)
+        self.assertEqual(len(bars), 2)
+
+    def test_empty_result_is_retried_then_reported(self):
+        # yfinance はレート制限時に例外ではなく空フレームを返すことがある
+        fake = FakeTicker([], empty=True)
+        with self.assertRaises(sc.DataSourceError) as ctx:
+            self.make_source({"7203.T": fake}).fetch_bars("7203.T")
+        self.assertEqual(fake.history_calls, 3)
+        self.assertIn("データが空でした", str(ctx.exception))
+
+    def test_raises_after_max_retries(self):
+        fake = FakeTicker([100.0], fail_times=99)
+        with self.assertRaises(sc.DataSourceError):
+            self.make_source({"7203.T": fake}).fetch_bars("7203.T")
+
+    def test_profile_extracts_name_per_pbr(self):
+        fake = FakeTicker([100.0], info={"shortName": "TOYOTA MOTOR",
+                                         "trailingPE": 12.5, "priceToBook": 1.3})
+        profile = self.make_source({"7203.T": fake}).fetch_profile("7203.T")
+        self.assertEqual(profile.name, "TOYOTA MOTOR")
+        self.assertAlmostEqual(profile.per, 12.5)
+        self.assertAlmostEqual(profile.pbr, 1.3)
+
+    def test_profile_falls_back_to_forward_pe(self):
+        fake = FakeTicker([100.0], info={"longName": "Sony Group", "forwardPE": 20.0})
+        profile = self.make_source({"7203.T": fake}).fetch_profile("7203.T")
+        self.assertEqual(profile.name, "Sony Group")
+        self.assertAlmostEqual(profile.per, 20.0)
+        self.assertIsNone(profile.pbr)
+
+    def test_profile_drops_non_positive_values(self):
+        # 赤字銘柄の PER などは空欄にする
+        fake = FakeTicker([100.0], info={"shortName": "X", "trailingPE": -5.0, "priceToBook": 0})
+        profile = self.make_source({"7203.T": fake}).fetch_profile("7203.T")
+        self.assertIsNone(profile.per)
+        self.assertIsNone(profile.pbr)
+
+    def test_profile_is_empty_when_fetch_fails(self):
+        class Broken:
+            @property
+            def info(self):
+                raise RuntimeError("no info")
+        source = sc.YFinanceSource(ticker_factory=lambda t: Broken(),
+                                   interval_sec=0, max_retries=1, backoff_sec=0)
+        profile = source.fetch_profile("7203.T")
+        self.assertEqual(profile, sc.Profile())
+
+
+class TestScreenCode(unittest.TestCase):
+    def test_returns_judgement_and_name(self):
+        fake = FakeTicker(BUY_SIGNAL_CLOSES,
+                          volumes=[1000.0] * (len(BUY_SIGNAL_CLOSES) - 1) + [3000.0],
+                          info={"shortName": "テスト商事", "trailingPE": 10.0, "priceToBook": 1.1})
+        source = sc.YFinanceSource(ticker_factory=lambda t: fake, interval_sec=0)
+        result = sc.screen_code(source, "7203")
+        self.assertEqual(result.code, "7203")
+        self.assertEqual(result.name, "テスト商事")
+        self.assertEqual(result.judgement, sc.LABEL_BUY, result.reason)
+        self.assertEqual(result.indicators.cross, "golden")
+        self.assertAlmostEqual(result.indicators.per, 10.0)
+        self.assertEqual(result.error, "")
+
+    def test_no_fundamentals_skips_info_call(self):
+        fake = FakeTicker(GOLDEN_CROSS_CLOSES)
+        source = sc.YFinanceSource(ticker_factory=lambda t: fake, interval_sec=0)
+        result = sc.screen_code(source, "7203", with_fundamentals=False)
+        self.assertEqual(fake.info_calls, 0)
+        self.assertEqual(result.name, "")
+
+    def test_records_error_when_source_fails(self):
+        fake = FakeTicker([100.0], fail_times=99)
+        source = sc.YFinanceSource(ticker_factory=lambda t: fake,
+                                   interval_sec=0, max_retries=2, backoff_sec=0)
+        result = sc.screen_code(source, "7203")
+        self.assertEqual(result.judgement, sc.LABEL_NO_DATA)
+        self.assertIn("取得エラー", result.reason)
+        self.assertTrue(result.error)
+
+    def test_empty_history_is_not_fatal(self):
+        fake = FakeTicker([], empty=True)
+        source = sc.YFinanceSource(ticker_factory=lambda t: fake, interval_sec=0,
+                                   max_retries=1, backoff_sec=0)
+        result = sc.screen_code(source, "9999", with_fundamentals=False)
+        self.assertEqual(result.judgement, sc.LABEL_NO_DATA)
+        self.assertIn("取得エラー", result.reason)
+        self.assertTrue(result.error)
+
+
+class TestMainEndToEnd(unittest.TestCase):
+    """CLI から CSV 出力まで、ダミーのデータソースで通しで動かす。"""
+
+    def test_main_writes_csv(self):
+        buy_closes = BUY_SIGNAL_CLOSES
+        volumes = [1000.0] * (len(buy_closes) - 1) + [3000.0]
+        tickers = {
+            "7203.T": FakeTicker(buy_closes, volumes,
+                                 info={"shortName": "買い候補商事", "trailingPE": 10.0,
+                                       "priceToBook": 1.1}),
+            "9999.T": FakeTicker([], empty=True, info={"shortName": "データなし物産"}),
+        }
+        source = sc.YFinanceSource(ticker_factory=lambda t: tickers[t], interval_sec=0,
+                                   max_retries=1, backoff_sec=0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "out.csv")
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                code = sc.main(["--codes", "7203", "9999", "--output", path], source=source)
+            self.assertEqual(code, 0)
+            with open(path, encoding="utf-8-sig", newline="") as fp:
+                rows = {r["code"]: r for r in csv.DictReader(fp)}
+
+        self.assertEqual(rows["7203"]["judgement"], sc.LABEL_BUY)
+        self.assertEqual(rows["7203"]["name"], "買い候補商事")
+        self.assertEqual(rows["7203"]["per"], "10.00")
+        self.assertEqual(rows["7203"]["volume_ratio"], "3.00")
+        self.assertIn("ゴールデンクロス", rows["7203"]["reason"])
+        self.assertEqual(rows["9999"]["judgement"], sc.LABEL_NO_DATA)
+        self.assertEqual(rows["9999"]["close"], "")
+
+    def test_main_rejects_bad_date(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(sc.main(["--codes", "7203", "--date", "2025/06/30"]), 2)
 
 
 if __name__ == "__main__":

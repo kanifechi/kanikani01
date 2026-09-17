@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""日本株ルールベース銘柄判定ツール (J-Quants API / CSV 出力版)
+"""日本株ルールベース銘柄判定ツール (yfinance / CSV 出力版)
 
-ウォッチリストの銘柄について J-Quants API から日足を取得し、
+ウォッチリストの銘柄について yfinance 経由で日足を取得し、
 移動平均・RSI・出来高比率・PER/PBR を計算して「買い候補 / 売り候補 / 様子見」を判定、
 結果を CSV に書き出す単体スクリプト。
 
 使い方:
-    export JQUANTS_MAIL_ADDRESS="you@example.com"
-    export JQUANTS_PASSWORD="********"
+    pip install -r requirements.txt
     python screener.py                       # watchlist.json の銘柄を判定して output/ に CSV 出力
     python screener.py --codes 7203 6758     # 銘柄コードを直接指定
     python screener.py --output result.csv   # 出力先を指定
 
 注意:
-    J-Quants の無料プランはデータが約 12 週間遅延する。
-    「当日」とは「取得できた最新営業日」を指す。
+    yfinance は Yahoo Finance の非公式ライブラリで、API キーは不要な代わりに
+    - 株価は約 15 分遅延
+    - 短時間に大量リクエストを送ると 429 (レート制限) で弾かれる
+    という性質がある。呼び出し間隔 (REQUEST_INTERVAL_SEC) は余裕をもって設定すること。
 """
 
 from __future__ import annotations
@@ -24,14 +25,12 @@ import argparse
 import csv
 import datetime as dt
 import json
+import math
 import os
 import sys
 import time
-import urllib.parse
 from dataclasses import dataclass
-from typing import Any, Iterable, Optional
-
-import requests
+from typing import Any, Callable, Iterable, Optional
 
 # =============================================================================
 # 判定パラメータ（ここだけ触れば判定ロジックを調整できる）
@@ -65,9 +64,11 @@ LABEL_NO_DATA = "判定不可"
 
 # --- データ取得 ---
 HISTORY_ROWS = 90          # 指標計算に使う日足の本数（営業日ベース）
-FETCH_CALENDAR_DAYS = 400  # 上記本数を確保するために遡る暦日数（休場日を考慮した余裕込み）
-API_INTERVAL_SEC = 0.2     # API 連続呼び出しの間隔（無料プランへの配慮）
-REQUEST_TIMEOUT_SEC = 30
+FETCH_PERIOD = "1y"        # yfinance に渡す取得期間（上記本数を確保するための余裕込み）
+TICKER_SUFFIX = ".T"       # 東証。他市場なら変更（名証 .N / 札証 .S / 福証 .F）
+REQUEST_INTERVAL_SEC = 1.0 # 呼び出し間隔（429 回避。銘柄数が多いときは長めに）
+MAX_RETRIES = 3            # 取得失敗時のリトライ回数
+RETRY_BACKOFF_SEC = 3.0    # リトライ間隔（回数に応じて伸ばす）
 
 # --- ウォッチリスト（watchlist.json が無い場合のフォールバック）---
 DEFAULT_WATCHLIST = ["7203", "6758", "9984", "8306", "6501", "4063"]
@@ -93,141 +94,144 @@ CSV_COLUMNS = [
     "reason",         # 判定理由
 ]
 
-JQUANTS_BASE_URL = os.environ.get("JQUANTS_BASE_URL", "https://api.jquants.com/v1")
+
+# =============================================================================
+# 銘柄コードとティッカー
+# =============================================================================
+
+def to_ticker(code: str) -> str:
+    """銘柄コードを yfinance のティッカーに変換する（7203 -> 7203.T）。"""
+    code = str(code).strip().upper()
+    if "." in code:      # 既に 7203.T のような形式ならそのまま
+        return code
+    if len(code) == 5 and code.endswith("0"):
+        code = code[:-1]  # J-Quants 形式の 5 桁コードにも一応対応（72030 -> 7203）
+    return code + TICKER_SUFFIX
+
+
+def display_code(code: str) -> str:
+    """表示用の銘柄コードに整える（7203.T -> 7203）。"""
+    code = str(code).strip().upper()
+    if "." in code:
+        code = code.split(".")[0]
+    if len(code) == 5 and code.endswith("0"):
+        code = code[:-1]
+    return code
 
 
 # =============================================================================
-# J-Quants API クライアント
+# データ取得（yfinance）
 # =============================================================================
 
-class JQuantsError(RuntimeError):
-    """J-Quants API 関連のエラー。"""
+class DataSourceError(RuntimeError):
+    """株価データ取得に関するエラー。"""
 
 
-class JQuantsClient:
-    """J-Quants API の薄いラッパー。
+def _default_ticker_factory(ticker: str) -> Any:
+    """yfinance の Ticker を生成する（インポートはここで行う）。
 
-    認証は環境変数から読み込む（優先順）:
-      1. JQUANTS_ID_TOKEN                          … ID トークン直指定（有効期間 24 時間）
-      2. JQUANTS_REFRESH_TOKEN                     … リフレッシュトークン（有効期間 1 週間）
-      3. JQUANTS_MAIL_ADDRESS + JQUANTS_PASSWORD   … メール/パスワードから自動取得
+    モジュール読み込み時点では yfinance を必要としないため、
+    テストや指標計算だけの利用では依存ライブラリなしで動く。
+    """
+    try:
+        import yfinance  # noqa: PLC0415
+    except ImportError as exc:  # pragma: no cover - 環境依存
+        raise DataSourceError(
+            "yfinance がインストールされていません。`pip install -r requirements.txt` を実行してください。"
+        ) from exc
+    return yfinance.Ticker(ticker)
+
+
+@dataclass
+class Profile:
+    """銘柄の基本情報とバリュエーション（取得できた分だけ）。"""
+
+    name: str = ""
+    per: Optional[float] = None
+    pbr: Optional[float] = None
+
+
+class YFinanceSource:
+    """yfinance をラップしたデータ取得層。
+
+    ticker_factory を差し替えればテスト用のダミーにも置き換えられる。
     """
 
-    def __init__(self, id_token: str, interval_sec: float = API_INTERVAL_SEC) -> None:
-        self._id_token = id_token
+    def __init__(self, ticker_factory: Optional[Callable[[str], Any]] = None,
+                 interval_sec: float = REQUEST_INTERVAL_SEC,
+                 max_retries: int = MAX_RETRIES,
+                 backoff_sec: float = RETRY_BACKOFF_SEC) -> None:
+        self._ticker_factory = ticker_factory or _default_ticker_factory
         self._interval_sec = interval_sec
-        self._session = requests.Session()
-        self._session.headers.update({"Authorization": f"Bearer {id_token}"})
+        self._max_retries = max_retries
+        self._backoff_sec = backoff_sec
+        self._cache: dict[str, Any] = {}
 
-    # ---- 認証 -------------------------------------------------------------
+    def _ticker(self, ticker: str) -> Any:
+        """同じ銘柄では Ticker オブジェクトを使い回す（余計な通信を減らす）。"""
+        if ticker not in self._cache:
+            self._cache[ticker] = self._ticker_factory(ticker)
+        return self._cache[ticker]
 
-    @classmethod
-    def from_env(cls, interval_sec: float = API_INTERVAL_SEC) -> "JQuantsClient":
-        id_token = os.environ.get("JQUANTS_ID_TOKEN", "").strip()
-        if id_token:
-            return cls(id_token, interval_sec)
+    def _call_with_retry(self, label: str, func: Callable[[], Any],
+                         is_valid: Optional[Callable[[Any], bool]] = None) -> Any:
+        """レート制限や一時的な通信エラーに備えてリトライする。
 
-        refresh_token = os.environ.get("JQUANTS_REFRESH_TOKEN", "").strip()
-        if not refresh_token:
-            mail = os.environ.get("JQUANTS_MAIL_ADDRESS", "").strip()
-            password = os.environ.get("JQUANTS_PASSWORD", "")
-            if not mail or not password:
-                raise JQuantsError(
-                    "認証情報が見つかりません。以下のいずれかを環境変数に設定してください:\n"
-                    "  - JQUANTS_ID_TOKEN\n"
-                    "  - JQUANTS_REFRESH_TOKEN\n"
-                    "  - JQUANTS_MAIL_ADDRESS と JQUANTS_PASSWORD"
-                )
-            refresh_token = cls._fetch_refresh_token(mail, password)
+        yfinance はレート制限時に例外ではなく「空の結果」を返すことがあるため、
+        is_valid を渡して「成功したが中身が無い」ケースもリトライ対象にできる。
+        """
+        last_error: Optional[str] = None
+        for attempt in range(1, self._max_retries + 1):
+            if self._interval_sec:
+                time.sleep(self._interval_sec)
+            try:
+                value = func()
+                if is_valid is None or is_valid(value):
+                    return value
+                last_error = "データが空でした（レート制限・コード誤り・上場廃止の可能性）"
+            except Exception as exc:  # yfinance は多様な例外を投げるため広めに捕捉する
+                last_error = str(exc)
+            if attempt < self._max_retries:
+                time.sleep(self._backoff_sec * attempt)
+        raise DataSourceError(f"{label}の取得に失敗しました: {last_error}")
 
-        return cls(cls._fetch_id_token(refresh_token), interval_sec)
+    # ---- 日足 -------------------------------------------------------------
 
-    @staticmethod
-    def _fetch_refresh_token(mail: str, password: str) -> str:
-        url = f"{JQUANTS_BASE_URL}/token/auth_user"
-        res = requests.post(
-            url,
-            data=json.dumps({"mailaddress": mail, "password": password}),
-            timeout=REQUEST_TIMEOUT_SEC,
+    def fetch_bars(self, ticker: str, until: Optional[dt.date] = None) -> list[Bar]:
+        """日足を古い順に返す。until を指定するとその日までに絞り込む。"""
+        frame = self._call_with_retry(
+            f"{ticker} の日足",
+            lambda: self._ticker(ticker).history(
+                period=FETCH_PERIOD, interval="1d", auto_adjust=True
+            ),
+            is_valid=lambda f: f is not None and len(f) > 0,
         )
-        if res.status_code != 200:
-            raise JQuantsError(f"リフレッシュトークンの取得に失敗しました ({res.status_code}): {res.text}")
-        token = res.json().get("refreshToken")
-        if not token:
-            raise JQuantsError("レスポンスに refreshToken が含まれていません。")
-        return token
+        return bars_from_dataframe(frame, until=until)
 
-    @staticmethod
-    def _fetch_id_token(refresh_token: str) -> str:
-        query = urllib.parse.urlencode({"refreshtoken": refresh_token})
-        url = f"{JQUANTS_BASE_URL}/token/auth_refresh?{query}"
-        res = requests.post(url, timeout=REQUEST_TIMEOUT_SEC)
-        if res.status_code != 200:
-            raise JQuantsError(f"ID トークンの取得に失敗しました ({res.status_code}): {res.text}")
-        token = res.json().get("idToken")
-        if not token:
-            raise JQuantsError("レスポンスに idToken が含まれていません。")
-        return token
+    # ---- 銘柄情報・バリュエーション ---------------------------------------
 
-    # ---- 低レベル GET -----------------------------------------------------
-
-    def _get(self, path: str, params: dict[str, Any], collect_key: str) -> list[dict[str, Any]]:
-        """ページネーションを解決しつつ GET し、collect_key の配列を結合して返す。"""
-        rows: list[dict[str, Any]] = []
-        params = dict(params)
-        while True:
-            time.sleep(self._interval_sec)
-            res = self._session.get(
-                f"{JQUANTS_BASE_URL}{path}", params=params, timeout=REQUEST_TIMEOUT_SEC
-            )
-            if res.status_code != 200:
-                raise JQuantsError(f"{path} でエラー ({res.status_code}): {res.text}")
-            payload = res.json()
-            rows.extend(payload.get(collect_key, []))
-            pagination_key = payload.get("pagination_key")
-            if not pagination_key:
-                return rows
-            params["pagination_key"] = pagination_key
-
-    # ---- 各エンドポイント -------------------------------------------------
-
-    def get_daily_quotes(self, code: str, date_from: dt.date, date_to: dt.date) -> list[dict[str, Any]]:
-        """日足（始値・終値・出来高など）を日付昇順で返す。"""
-        rows = self._get(
-            "/prices/daily_quotes",
-            {
-                "code": code,
-                "from": date_from.strftime("%Y-%m-%d"),
-                "to": date_to.strftime("%Y-%m-%d"),
-            },
-            "daily_quotes",
+    def fetch_profile(self, ticker: str) -> Profile:
+        """銘柄名と PER/PBR を取得する。取れなければ空の Profile。"""
+        try:
+            info = self._call_with_retry(f"{ticker} の銘柄情報", lambda: self._ticker(ticker).info)
+        except DataSourceError:
+            return Profile()
+        if not isinstance(info, dict):
+            return Profile()
+        return Profile(
+            name=str(info.get("shortName") or info.get("longName") or ""),
+            per=_positive(_to_float(info.get("trailingPE") or info.get("forwardPE"))),
+            pbr=_positive(_to_float(info.get("priceToBook"))),
         )
-        return sorted(rows, key=lambda r: r.get("Date", ""))
-
-    def get_listed_info(self, code: str) -> dict[str, Any]:
-        """銘柄基本情報（銘柄名など）。取得できなければ空 dict。"""
-        try:
-            rows = self._get("/listed/info", {"code": code}, "info")
-        except JQuantsError:
-            return {}
-        return rows[-1] if rows else {}
-
-    def get_statements(self, code: str) -> list[dict[str, Any]]:
-        """財務諸表（EPS/BPS を含む）。取得できなければ空リスト。"""
-        try:
-            rows = self._get("/fins/statements", {"code": code}, "statements")
-        except JQuantsError:
-            return []
-        return sorted(rows, key=lambda r: r.get("DisclosedDate", ""))
 
 
 # =============================================================================
-# 指標計算
+# 日足データの変換
 # =============================================================================
 
 @dataclass
 class Bar:
-    """日足 1 本分（調整後の値を優先して保持する）。"""
+    """日足 1 本分（分割・配当調整後の値）。"""
 
     date: str
     open: Optional[float]
@@ -236,36 +240,57 @@ class Bar:
 
 
 def _to_float(value: Any) -> Optional[float]:
+    """数値に変換する。NaN・None・空文字は None として扱う。"""
     if value is None or value == "":
         return None
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         return None
+    return None if math.isnan(number) else number
 
 
-def parse_bars(rows: Iterable[dict[str, Any]]) -> list[Bar]:
-    """J-Quants の daily_quotes を Bar のリストに変換する。
+def _positive(value: Optional[float]) -> Optional[float]:
+    """0 以下は「意味のある値ではない」とみなして None にする（赤字銘柄の PER など）。"""
+    return value if value is not None and value > 0 else None
 
-    株式分割の影響を避けるため Adjustment* （調整後）を優先し、無ければ生値を使う。
-    終値が無い日（売買停止など）はスキップする。
+
+def _format_date(index_value: Any) -> str:
+    strftime = getattr(index_value, "strftime", None)
+    return strftime("%Y-%m-%d") if callable(strftime) else str(index_value)[:10]
+
+
+def bars_from_dataframe(frame: Any, until: Optional[dt.date] = None) -> list[Bar]:
+    """yfinance の DataFrame を Bar のリストに変換する。
+
+    - 終値が欠損している行（売買停止など）はスキップする
+    - until を指定すると、その日以前の行だけを残す（--date 用）
     """
+    if frame is None or len(frame) == 0:
+        return []
+
     bars: list[Bar] = []
-    for row in rows:
-        close = _to_float(row.get("AdjustmentClose"))
-        if close is None:
-            close = _to_float(row.get("Close"))
+    for index_value, row in frame.iterrows():
+        if until is not None:
+            row_date = getattr(index_value, "date", None)
+            if callable(row_date) and row_date() > until:
+                continue
+        close = _to_float(row.get("Close"))
         if close is None:
             continue
-        open_ = _to_float(row.get("AdjustmentOpen"))
-        if open_ is None:
-            open_ = _to_float(row.get("Open"))
-        volume = _to_float(row.get("AdjustmentVolume"))
-        if volume is None:
-            volume = _to_float(row.get("Volume"))
-        bars.append(Bar(date=str(row.get("Date", "")), open=open_, close=close, volume=volume))
+        bars.append(Bar(
+            date=_format_date(index_value),
+            open=_to_float(row.get("Open")),
+            close=close,
+            volume=_to_float(row.get("Volume")),
+        ))
+    bars.sort(key=lambda b: b.date)
     return bars
 
+
+# =============================================================================
+# 指標計算
+# =============================================================================
 
 def sma(values: list[float], period: int, offset: int = 0) -> Optional[float]:
     """単純移動平均。offset=0 で末尾（最新）、offset=1 で 1 日前の値。"""
@@ -337,44 +362,6 @@ def cross_state(closes: list[float], short_period: int = MA_SHORT_PERIOD,
 
 
 # =============================================================================
-# PER / PBR（取得できた場合のみ）
-# =============================================================================
-
-def _pick_number(statement: dict[str, Any], keys: list[str]) -> Optional[float]:
-    for key in keys:
-        value = _to_float(statement.get(key))
-        if value is not None:
-            return value
-    return None
-
-
-def calc_valuation(statements: list[dict[str, Any]], close: float
-                   ) -> tuple[Optional[float], Optional[float]]:
-    """直近の開示から EPS / BPS を拾って PER・PBR を算出する。
-
-    J-Quants の財務諸表には PER/PBR そのものが無いため、終値から計算する。
-    EPS/BPS が取れない、または 0 以下の場合は None（＝出力は空欄）。
-    """
-    per = pbr = None
-    for statement in reversed(statements):  # 新しい開示から順に探す
-        if per is None:
-            eps = _pick_number(statement, [
-                "EarningsPerShare",
-                "ForecastEarningsPerShare",
-                "NextYearForecastEarningsPerShare",
-            ])
-            if eps is not None and eps > 0:
-                per = close / eps
-        if pbr is None:
-            bps = _pick_number(statement, ["BookValuePerShare"])
-            if bps is not None and bps > 0:
-                pbr = close / bps
-        if per is not None and pbr is not None:
-            break
-    return per, pbr
-
-
-# =============================================================================
 # 判定ロジック
 # =============================================================================
 
@@ -396,7 +383,7 @@ class Indicators:
 
 
 def build_indicators(bars: list[Bar]) -> Optional[Indicators]:
-    """日足リストから各指標を計算する。データ不足なら None。"""
+    """日足リストから各指標を計算する。データが無ければ None。"""
     if not bars:
         return None
     closes = [b.close for b in bars]
@@ -415,8 +402,6 @@ def build_indicators(bars: list[Bar]) -> Optional[Indicators]:
         volume_avg=avg_volume,
         volume_ratio=ratio,
         cross=cross_state(closes, MA_SHORT_PERIOD, MA_MID_PERIOD),
-        per=None,
-        pbr=None,
     )
 
 
@@ -473,24 +458,8 @@ def judge(ind: Optional[Indicators]) -> tuple[str, str]:
 
 
 # =============================================================================
-# 銘柄コードとウォッチリスト
+# ウォッチリスト
 # =============================================================================
-
-def normalize_code(code: str) -> str:
-    """J-Quants の 5 桁コードに正規化する（7203 -> 72030）。"""
-    code = str(code).strip().upper()
-    if len(code) == 4:
-        return code + "0"
-    return code
-
-
-def display_code(code: str) -> str:
-    """表示用の 4 桁コードに戻す（72030 -> 7203）。"""
-    code = str(code).strip().upper()
-    if len(code) == 5 and code.endswith("0"):
-        return code[:-1]
-    return code
-
 
 def load_watchlist(path: Optional[str]) -> list[str]:
     """watchlist.json（{"codes": [...]} または [...]）を読む。無ければ既定値。"""
@@ -549,30 +518,27 @@ def _csv_num(value: Optional[float], digits: int = 2) -> str:
     return f"{value:.{digits}f}" if digits > 0 else f"{value:.0f}"
 
 
-def screen_code(client: JQuantsClient, raw_code: str, today: dt.date,
+def screen_code(source: YFinanceSource, raw_code: str, until: Optional[dt.date] = None,
                 with_fundamentals: bool = True, verbose: bool = False) -> Result:
     """1 銘柄分の取得・計算・判定をまとめて行う。"""
-    code = normalize_code(raw_code)
-    result = Result(code=display_code(code))
+    ticker = to_ticker(raw_code)
+    result = Result(code=display_code(ticker))
 
     try:
-        date_from = today - dt.timedelta(days=FETCH_CALENDAR_DAYS)
-        rows = client.get_daily_quotes(code, date_from, today)
-        bars = parse_bars(rows)[-HISTORY_ROWS:]
+        bars = source.fetch_bars(ticker, until=until)[-HISTORY_ROWS:]
         if verbose:
             print(f"  [{result.code}] 日足 {len(bars)} 本を取得", file=sys.stderr)
 
-        info = client.get_listed_info(code)
-        result.name = info.get("CompanyName") or info.get("CompanyNameEnglish") or ""
-
         indicators = build_indicators(bars)
-        if indicators is not None and with_fundamentals and indicators.close is not None:
-            statements = client.get_statements(code)
-            indicators.per, indicators.pbr = calc_valuation(statements, indicators.close)
+        if with_fundamentals:
+            profile = source.fetch_profile(ticker)
+            result.name = profile.name
+            if indicators is not None:
+                indicators.per, indicators.pbr = profile.per, profile.pbr
 
         result.indicators = indicators
         result.judgement, result.reason = judge(indicators)
-    except JQuantsError as exc:
+    except DataSourceError as exc:
         result.error = str(exc)
         result.judgement = LABEL_NO_DATA
         result.reason = f"取得エラー: {exc}"
@@ -583,7 +549,7 @@ def screen_code(client: JQuantsClient, raw_code: str, today: dt.date,
 # 出力
 # =============================================================================
 
-def write_csv(results: list[Result], path: str) -> str:
+def write_csv(results: Iterable[Result], path: str) -> str:
     directory = os.path.dirname(os.path.abspath(path))
     os.makedirs(directory, exist_ok=True)
     # Excel で開いても文字化けしないよう BOM 付き UTF-8 で出力する
@@ -619,7 +585,7 @@ def default_output_path(today: dt.date) -> str:
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="J-Quants API を使った日本株のルールベース銘柄判定ツール",
+        description="yfinance を使った日本株のルールベース銘柄判定ツール",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--codes", nargs="+", metavar="CODE",
@@ -627,21 +593,25 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--watchlist", metavar="PATH", help="ウォッチリスト JSON のパス")
     parser.add_argument("--output", metavar="PATH", help="CSV の出力先（省略時は output/screening_YYYYMMDD.csv）")
     parser.add_argument("--date", metavar="YYYY-MM-DD",
-                        help="基準日（この日までのデータで判定する）。省略時は本日")
+                        help="基準日（この日までのデータで判定する）。省略時は取得できた最新営業日")
     parser.add_argument("--no-fundamentals", action="store_true",
-                        help="PER/PBR の取得をスキップする（API 呼び出しを減らせる）")
+                        help="銘柄名・PER/PBR の取得をスキップする（通信量を半減できる）")
+    parser.add_argument("--interval", type=float, default=REQUEST_INTERVAL_SEC, metavar="SEC",
+                        help=f"API 呼び出し間隔の秒数（既定: {REQUEST_INTERVAL_SEC}）。429 が出るときは長くする")
     parser.add_argument("--verbose", "-v", action="store_true", help="処理の詳細を表示する")
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None, source: Optional[YFinanceSource] = None) -> int:
     args = parse_args(argv)
 
-    try:
-        today = dt.date.fromisoformat(args.date) if args.date else dt.date.today()
-    except ValueError:
-        print(f"日付の形式が不正です: {args.date} (YYYY-MM-DD で指定してください)", file=sys.stderr)
-        return 2
+    until: Optional[dt.date] = None
+    if args.date:
+        try:
+            until = dt.date.fromisoformat(args.date)
+        except ValueError:
+            print(f"日付の形式が不正です: {args.date} (YYYY-MM-DD で指定してください)", file=sys.stderr)
+            return 2
 
     try:
         codes = args.codes if args.codes else load_watchlist(args.watchlist)
@@ -649,32 +619,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"ウォッチリストの読み込みに失敗しました: {exc}", file=sys.stderr)
         return 2
 
-    try:
-        client = JQuantsClient.from_env()
-    except JQuantsError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    except requests.RequestException as exc:
-        print(f"認証時に通信エラーが発生しました: {exc}", file=sys.stderr)
-        return 1
+    source = source or YFinanceSource(interval_sec=args.interval)
 
-    print(f"基準日: {today:%Y-%m-%d} / 対象 {len(codes)} 銘柄", file=sys.stderr)
+    label = f"{until:%Y-%m-%d} まで" if until else "最新営業日"
+    print(f"基準日: {label} / 対象 {len(codes)} 銘柄", file=sys.stderr)
     results: list[Result] = []
     for index, code in enumerate(codes, start=1):
         print(f"[{index}/{len(codes)}] {code} を処理中...", file=sys.stderr)
-        try:
-            results.append(
-                screen_code(client, code, today,
-                            with_fundamentals=not args.no_fundamentals,
-                            verbose=args.verbose)
-            )
-        except requests.RequestException as exc:
-            results.append(Result(code=display_code(normalize_code(code)),
-                                  judgement=LABEL_NO_DATA,
-                                  reason=f"通信エラー: {exc}",
-                                  error=str(exc)))
+        results.append(
+            screen_code(source, code, until=until,
+                        with_fundamentals=not args.no_fundamentals,
+                        verbose=args.verbose)
+        )
 
-    output_path = args.output or default_output_path(today)
+    output_path = args.output or default_output_path(dt.date.today())
     write_csv(results, output_path)
     print_summary(results)
     print(f"\nCSV を出力しました: {output_path}")
