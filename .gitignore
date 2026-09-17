@@ -1,6 +1,5 @@
-# 出力ファイル
+# ローカル実行時の出力（GitHub Actions の結果は results/ に残すので除外しない）
 stock_screener/output/
-*.csv
 
 # Python
 __pycache__/
