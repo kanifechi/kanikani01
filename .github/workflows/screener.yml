@@ -48,7 +48,11 @@ jobs:
             --output "stock_screener/results/screening_${DATE}.csv"
           cp "stock_screener/results/screening_${DATE}.csv" stock_screener/results/latest.csv
 
+      # リポジトリの設定によっては書き込みが許可されていないことがある。
+      # その場合でも判定そのものは成功しているので、ここでは実行を止めない
+      # （結果はアーティファクトと実行サマリーから確認できる）。
       - name: 判定結果をコミット
+        continue-on-error: true
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
