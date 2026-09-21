@@ -29,6 +29,7 @@ import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.RequiresApi;
 import androidx.annotation.Nullable;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -96,9 +97,9 @@ public class MainActivity extends Activity {
         setUpWindow(root);
         setUpWebView();
 
-        if (savedInstanceState != null) {
-            webView.restoreState(savedInstanceState);
-        } else {
+        // restoreState() は WebView の状態が入っていない Bundle だと null を返す。
+        // そのまま放置すると真っ白な画面になるので、必ず読み込みにフォールバックする。
+        if (savedInstanceState == null || webView.restoreState(savedInstanceState) == null) {
             webView.loadUrl(START_URL);
         }
     }
@@ -265,25 +266,7 @@ public class MainActivity extends Activity {
                 ? "application/octet-stream" : save.mime;
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                ContentValues values = new ContentValues();
-                values.put(MediaStore.Downloads.DISPLAY_NAME, name);
-                values.put(MediaStore.Downloads.MIME_TYPE, mime);
-                values.put(MediaStore.Downloads.IS_PENDING, 1);
-
-                Uri item = getContentResolver()
-                        .insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-                if (item == null) {
-                    throw new IOException("MediaStore insert failed");
-                }
-                try (OutputStream out = getContentResolver().openOutputStream(item)) {
-                    if (out == null) {
-                        throw new IOException("openOutputStream failed");
-                    }
-                    out.write(save.bytes);
-                }
-                values.clear();
-                values.put(MediaStore.Downloads.IS_PENDING, 0);
-                getContentResolver().update(item, values, null, null);
+                writeViaMediaStore(name, mime, save.bytes);
             } else {
                 if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                         != PackageManager.PERMISSION_GRANTED) {
@@ -310,6 +293,29 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             toast(getString(R.string.save_failed));
         }
+    }
+
+    /** Android 10 以降。権限なしで Download フォルダへ書ける。 */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private void writeViaMediaStore(String name, String mime, byte[] bytes) throws IOException {
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.Downloads.DISPLAY_NAME, name);
+        values.put(MediaStore.Downloads.MIME_TYPE, mime);
+        values.put(MediaStore.Downloads.IS_PENDING, 1);
+
+        Uri item = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+        if (item == null) {
+            throw new IOException("MediaStore insert failed");
+        }
+        try (OutputStream out = getContentResolver().openOutputStream(item)) {
+            if (out == null) {
+                throw new IOException("openOutputStream failed");
+            }
+            out.write(bytes);
+        }
+        values.clear();
+        values.put(MediaStore.Downloads.IS_PENDING, 0);
+        getContentResolver().update(item, values, null, null);
     }
 
     @Override
