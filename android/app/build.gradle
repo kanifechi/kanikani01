@@ -1,0 +1,53 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.kanifechi.shikoboard'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.kanifechi.shikoboard"
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+    }
+
+    // 個人でサイドロードするための固定鍵。パスワードは公開値で、
+    // 「毎回おなじ署名になる＝上書きインストールできる」ことだけが目的。
+    // Google Play へ出す場合はこの鍵を使わず、専用の鍵を作り直すこと。
+    signingConfigs {
+        shared {
+            storeFile file("../keystore/app.keystore")
+            storePassword "android"
+            keyAlias "shikoboard"
+            keyPassword "android"
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.shared
+        }
+        release {
+            minifyEnabled false
+            shrinkResources false
+            signingConfig signingConfigs.shared
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
+    implementation 'androidx.core:core:1.13.1'
+}

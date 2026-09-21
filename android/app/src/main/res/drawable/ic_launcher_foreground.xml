@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HTML の favicon（2 つのノードを線でつないだ図）を 108dp のセーフゾーンに収めたもの -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M41.04,42.48 L68.4,59.76"
+        android:strokeColor="#E9EDEE"
+        android:strokeWidth="3.6"
+        android:strokeLineCap="round" />
+    <path
+        android:fillColor="#3D6EA8"
+        android:pathData="M41.04,42.48 m-6.48,0 a6.48,6.48 0 1,0 12.96,0 a6.48,6.48 0 1,0 -12.96,0 z" />
+    <path
+        android:fillColor="#CF5A3D"
+        android:pathData="M68.4,59.76 m-6.48,0 a6.48,6.48 0 1,0 12.96,0 a6.48,6.48 0 1,0 -12.96,0 z" />
+</vector>

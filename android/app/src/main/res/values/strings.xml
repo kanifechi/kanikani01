@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">思考整理ボード</string>
+    <string name="pick_file">読み込むファイルを選ぶ</string>
+    <string name="no_file_picker">ファイルを選べるアプリが見つかりませんでした</string>
+    <string name="saved_to_downloads">Download に保存しました: %1$s</string>
+    <string name="save_failed">保存できませんでした</string>
+    <string name="need_storage_permission">保存するにはストレージへのアクセス許可が必要です</string>
+</resources>

@@ -1,0 +1,1708 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#e9edee" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="思考整理ボード" />
+<title>思考整理ボード ｜ マインドマップ＋メモ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%2316212c'/%3E%3Ccircle cx='32' cy='34' r='9' fill='%233d6ea8'/%3E%3Ccircle cx='70' cy='58' r='9' fill='%23cf5a3d'/%3E%3Cpath d='M32 34 L70 58' stroke='%23e9edee' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+  :root {
+    --paper: #e9edee;
+    --canvas: #f5f7f8;
+    --surface: #ffffff;
+    --ink: #16212c;
+    --muted: #5c6a77;
+    --faint: #8e9aa5;
+    --thread: #3d6ea8;
+    --thread-soft: color-mix(in oklab, var(--thread) 16%, transparent);
+    --accent: #cf5a3d;
+    --accent-soft: color-mix(in oklab, var(--accent) 16%, transparent);
+    --line: color-mix(in oklab, var(--ink) 13%, transparent);
+    --line-strong: color-mix(in oklab, var(--ink) 22%, transparent);
+    --grid-dot: color-mix(in oklab, var(--ink) 11%, transparent);
+    --well: #eef1f2;
+
+    --font-ui: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif;
+    --font-mono: "Space Mono", ui-monospace, "Noto Sans JP", monospace;
+
+    --radius: 12px;
+    --shadow-card: 0 1px 2px rgba(22,33,44,.06), 0 10px 24px -16px rgba(22,33,44,.5);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 15px;
+    line-height: 1.7;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior: none;
+  }
+
+  .app { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+
+  /* ---------- topbar ---------- */
+  .topbar {
+    flex: none; display: flex; align-items: center; justify-content: space-between;
+    gap: .5rem; padding: .55rem .7rem;
+    padding-top: calc(.55rem + env(safe-area-inset-top, 0px));
+    background: var(--paper); border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: baseline; gap: .55rem; min-width: 0; }
+  .brand h1 { font-size: 1rem; font-weight: 700; letter-spacing: .01em; margin: 0; white-space: nowrap; }
+  .brand .mono {
+    font-family: var(--font-mono); font-size: .6rem; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--faint); white-space: nowrap;
+  }
+  .top-actions { display: flex; align-items: center; gap: .3rem; flex: none; }
+  .btn {
+    font: inherit; font-size: .74rem; font-weight: 600; letter-spacing: .01em;
+    color: var(--muted); background: transparent;
+    border: 1px solid var(--line-strong); border-radius: 8px;
+    padding: .3rem .55rem; cursor: pointer; white-space: nowrap;
+    transition: background .18s, border-color .18s, color .18s;
+  }
+  .btn:hover { background: var(--well); color: var(--ink); border-color: var(--faint); }
+  .btn:focus-visible { outline: 2px solid var(--thread); outline-offset: 2px; }
+  .btn-primary { color: var(--thread); border-color: color-mix(in oklab, var(--thread) 45%, transparent); }
+  .btn-primary:hover { background: var(--thread); color: #fff; border-color: var(--thread); }
+
+  /* ---------- map ---------- */
+  .map-wrap {
+    position: relative; flex: none; min-height: 110px; overflow: hidden;
+    background: var(--canvas); border-bottom: 1px solid var(--line);
+  }
+  .map-viewport {
+    position: absolute; inset: 0; overflow: hidden;
+    touch-action: none; cursor: grab;
+    background-color: var(--canvas);
+    background-image: radial-gradient(var(--grid-dot) 1px, transparent 1.1px);
+    background-size: 22px 22px; background-position: -1px -1px;
+  }
+  .map-viewport.is-panning { cursor: grabbing; }
+
+  .map-world {
+    position: absolute; top: 0; left: 0;
+    width: 3600px; height: 2600px;
+    transform-origin: 0 0; pointer-events: none; touch-action: none;
+  }
+
+  .links { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+  .links g { fill: none; stroke: var(--thread); stroke-linecap: round; stroke-linejoin: round; }
+  .links .link { opacity: .62; }
+  .links .link-dot { fill: var(--thread); stroke: none; opacity: .85; }
+
+  .node {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    max-width: calc(150px * var(--ns, 1));
+    padding: calc(.5rem * var(--ns, 1)) calc(.78rem * var(--ns, 1));
+    border: 1px solid;
+    border-radius: calc(12px * var(--ns, 1));
+    box-shadow: var(--shadow-card);
+    font-size: calc(.84rem * var(--ns, 1));
+    line-height: 1.45; text-align: center; color: var(--ink);
+    word-break: normal; overflow-wrap: anywhere; white-space: pre-wrap;
+    cursor: grab; touch-action: none; pointer-events: auto;
+    user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+    transition: box-shadow .16s ease, transform .12s ease;
+  }
+  .node.col-plain  { background: #ffffff; border-color: #ccd6dc; }
+  .node.col-blue   { background: #dbe7f5; border-color: #a4c1e5; }
+  .node.col-green  { background: #dcefe2; border-color: #a2d3b7; }
+  .node.col-amber  { background: #f8eed3; border-color: #e3ca88; }
+  .node.col-coral  { background: #f8ded7; border-color: #e7a695; }
+  .node.col-purple { background: #e8e1f4; border-color: #c0aee0; }
+  .node.col-gray   { background: #e4e8ea; border-color: #b6c0c7; }
+
+  .node.is-selected { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-card); }
+  .node.is-dragging {
+    cursor: grabbing; transform: translate(-50%, -50%) scale(1.05);
+    box-shadow: 0 0 0 3px var(--thread-soft), var(--shadow-card);
+  }
+  .node:focus-visible { outline: 2px solid var(--thread); outline-offset: 3px; }
+
+  .node-badge {
+    position: absolute; top: -9px; left: -9px;
+    min-width: 18px; height: 18px; padding: 0 3px;
+    border-radius: 999px; background: var(--thread); color: #fff;
+    font-family: var(--font-mono); font-size: .58rem; line-height: 18px;
+    text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,.28);
+    display: none; pointer-events: none;
+  }
+  body.show-num .node-badge { display: block; }
+
+  /* ---------- map UI ---------- */
+  .map-hint {
+    position: absolute; top: .55rem; left: .55rem; z-index: 5;
+    max-width: min(62%, 260px);
+    font-size: .66rem; line-height: 1.5; color: var(--muted);
+    background: color-mix(in oklab, var(--surface) 82%, transparent);
+    backdrop-filter: blur(4px);
+    border: 1px solid var(--line); border-radius: 8px; padding: .3rem .5rem;
+    pointer-events: none;
+  }
+  .map-tools { position: absolute; top: .55rem; right: .55rem; z-index: 6; }
+  .tool-group {
+    display: flex; flex-direction: column;
+    background: color-mix(in oklab, var(--surface) 88%, transparent);
+    backdrop-filter: blur(4px);
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+    box-shadow: var(--shadow-card);
+  }
+  .tool {
+    font: inherit; font-size: .82rem; font-weight: 600;
+    width: 40px; height: 38px; display: grid; place-items: center; padding: 0;
+    border: 0; border-bottom: 1px solid var(--line);
+    background: transparent; color: var(--ink); cursor: pointer;
+    transition: background .16s, color .16s;
+  }
+  .tool:last-child { border-bottom: 0; }
+  .tool:hover { background: var(--thread-soft); color: var(--thread); }
+  .tool:focus-visible { outline: 2px solid var(--thread); outline-offset: -3px; }
+  .tool-accent { color: var(--thread); }
+  .tool-accent:hover { background: var(--thread); color: #fff; }
+
+  .toast {
+    position: absolute; left: 50%; bottom: .7rem; z-index: 8;
+    transform: translateX(-50%) translateY(6px);
+    font-size: .74rem; font-weight: 500; color: #fff;
+    background: color-mix(in oklab, var(--ink) 88%, transparent);
+    border-radius: 999px; padding: .34rem .8rem;
+    opacity: 0; pointer-events: none;
+    transition: opacity .22s ease, transform .22s ease; white-space: nowrap;
+  }
+  .toast.is-on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ---------- divider ---------- */
+  .divider {
+    flex: none; height: 18px; display: grid; place-items: center;
+    background: var(--paper); border-bottom: 1px solid var(--line);
+    cursor: row-resize; touch-action: none;
+  }
+  .divider .grip {
+    width: 46px; height: 4px; border-radius: 999px; background: var(--line-strong);
+    transition: background .18s, width .18s;
+  }
+  .divider:hover .grip, .divider.is-active .grip { background: var(--thread); width: 64px; }
+
+  /* ---------- lower panel ---------- */
+  .panel-wrap {
+    flex: none; min-height: 120px; display: flex; flex-direction: column;
+    overflow: hidden; background: var(--paper);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .panel-head {
+    flex: none; display: flex; align-items: center; justify-content: space-between;
+    gap: .5rem; padding: .3rem .6rem .3rem; border-bottom: 1px solid var(--line);
+  }
+  .tabs { display: flex; gap: .1rem; }
+  .tab {
+    font: inherit; font-size: .78rem; font-weight: 600; color: var(--muted);
+    background: transparent; border: 0; padding: .28rem .62rem; border-radius: 8px;
+    cursor: pointer; transition: background .16s, color .16s;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.is-active { color: var(--ink); background: var(--well); box-shadow: inset 0 0 0 1px var(--line); }
+  .tab:focus-visible { outline: 2px solid var(--thread); outline-offset: 2px; }
+  .tab.is-flagged { color: var(--thread); }
+
+  .head-meta { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+  .count { font-family: var(--font-mono); font-size: .64rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .chip-name { font-size: .72rem; color: var(--muted); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .panel-body { flex: 1; min-height: 0; position: relative; }
+  .pane { position: absolute; inset: 0; display: flex; flex-direction: column; padding: .5rem .6rem .6rem; }
+  .pane[hidden] { display: none; }
+
+  .field {
+    width: 100%;
+    font: inherit; font-size: .92rem; line-height: 1.85; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow-card); padding: .7rem .82rem; outline: none;
+    -webkit-appearance: none;
+  }
+  .field::placeholder { color: var(--faint); }
+  .field:focus { border-color: var(--thread); box-shadow: 0 0 0 3px var(--thread-soft), var(--shadow-card); }
+
+  #memoArea { flex: 1; height: 100%; resize: none; }
+  #chipText { flex: none; height: clamp(56px, 24vh, 130px); resize: none; overflow: auto; }
+
+  /* chip controls */
+  .chip-controls { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: .55rem; overflow-y: auto; }
+  .chip-controls[hidden] { display: none; }
+  .chip-empty {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: .35rem; text-align: center; color: var(--muted);
+  }
+  .chip-empty[hidden] { display: none; }
+  .chip-empty .big { font-size: .84rem; font-weight: 700; color: var(--ink); }
+  .chip-empty .small { font-size: .72rem; line-height: 1.6; max-width: 30ch; }
+
+  .chip-row { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; flex: none; }
+  .row-label {
+    font-family: var(--font-mono); font-size: .62rem; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--faint); flex: none; width: 3.6rem;
+  }
+  .seg { display: flex; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; }
+  .seg button {
+    font: inherit; font-size: .74rem; font-weight: 600; padding: .3rem .6rem;
+    border: 0; border-right: 1px solid var(--line); background: var(--surface);
+    color: var(--ink); cursor: pointer; transition: background .16s, color .16s;
+  }
+  .seg button:last-child { border-right: 0; }
+  .seg button.is-active { background: var(--thread); color: #fff; }
+  .seg button:focus-visible { outline: 2px solid var(--thread); outline-offset: -3px; }
+
+  .swatches { display: flex; gap: .38rem; flex-wrap: wrap; }
+  .sw {
+    width: 28px; height: 28px; padding: 0; border-radius: 50%;
+    border: 1px solid var(--line-strong); cursor: pointer;
+    transition: transform .14s, box-shadow .14s;
+  }
+  .sw:hover { transform: scale(1.08); }
+  .sw.is-active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--thread); }
+  .sw:focus-visible { outline: 2px solid var(--thread); outline-offset: 3px; }
+  .sw[data-color="plain"]  { background: #ffffff; }
+  .sw[data-color="blue"]   { background: #dbe7f5; }
+  .sw[data-color="green"]  { background: #dcefe2; }
+  .sw[data-color="amber"]  { background: #f8eed3; }
+  .sw[data-color="coral"]  { background: #f8ded7; }
+  .sw[data-color="purple"] { background: #e8e1f4; }
+  .sw[data-color="gray"]   { background: #e4e8ea; }
+
+  .chip-actions { display: flex; gap: .35rem; flex-wrap: wrap; padding-top: .1rem; }
+  .mini {
+    font: inherit; font-size: .74rem; font-weight: 600; color: var(--muted);
+    background: transparent; border: 1px solid var(--line-strong); border-radius: 8px;
+    padding: .34rem .62rem; cursor: pointer; touch-action: manipulation;
+    position: relative; z-index: 2;
+    transition: background .16s, color .16s, border-color .16s;
+  }
+  .mini:hover { background: var(--well); color: var(--ink); }
+  .mini.primary { background: var(--thread); border-color: var(--thread); color: #fff; }
+  .mini.primary:hover { background: color-mix(in oklab, var(--thread) 84%, #000); color: #fff; }
+  .mini.danger { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 42%, transparent); }
+  .mini.danger:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .mini.toggle.is-active { background: var(--thread); border-color: var(--thread); color: #fff; }
+  .mini:focus-visible { outline: 2px solid var(--thread); outline-offset: 2px; }
+
+  /* AI pane */
+  .pane-ai { padding: 0; }
+  .ai-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: .5rem; padding: .5rem .6rem .7rem; }
+  .ai-out {
+    height: clamp(340px, 72vh, 640px); resize: vertical;
+    font-family: var(--font-mono); font-size: .75rem; line-height: 1.62;
+    white-space: pre; overflow: auto; overflow-wrap: normal;
+  }
+  .ai-in { height: clamp(84px, 20vh, 150px); resize: vertical; }
+  .ai-sep {
+    display: flex; align-items: center; gap: .5rem;
+    font-family: var(--font-mono); font-size: .62rem; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--faint); margin-top: .15rem;
+  }
+  .ai-sep::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .ai-note { font-size: .68rem; line-height: 1.6; color: var(--muted); margin: 0; }
+
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  @media (max-width: 390px) {
+    .brand .mono { display: none; }
+    .map-hint { max-width: 52%; }
+    .row-label { width: 3rem; }
+    .tab { padding: .28rem .48rem; }
+  }
+  @media (max-width: 430px) {
+    .head-meta .count { display: none; }
+  }
+  @media (max-width: 340px) {
+    .brand h1 { font-size: .9rem; }
+    .btn { font-size: .7rem; padding: .28rem .45rem; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition-duration: .01ms !important; } }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <h1>思考整理ボード</h1>
+      <span class="mono">Map + Memo</span>
+    </div>
+    <div class="top-actions">
+      <button type="button" class="btn btn-primary" id="btnSave">保存</button>
+      <button type="button" class="btn" id="btnLoad">読込</button>
+      <button type="button" class="btn" id="btnResetAll">初期化</button>
+    </div>
+  </header>
+
+  <!-- ============ 上段：マインドマップ ============ -->
+  <section class="map-wrap" id="mapWrap" aria-label="マインドマップ">
+    <div class="map-viewport" id="mapViewport">
+      <div class="map-world" id="mapWorld">
+        <svg class="links" id="linksSvg" width="3600" height="2600" viewBox="0 0 3600 2600" aria-hidden="true">
+          <g id="linksG"></g>
+        </svg>
+        <div id="nodesLayer"></div>
+      </div>
+    </div>
+
+    <p class="map-hint">タップで選択／2つ続けてタップ＝線でつなぐ。<br>2本指ピンチで拡大・縮小、1本指で移動。</p>
+
+    <div class="map-tools">
+      <div class="tool-group">
+        <button type="button" class="tool tool-accent" id="btnAdd" aria-label="チップを追加" title="チップを追加">＋</button>
+        <button type="button" class="tool" id="btnZoomIn" aria-label="拡大" title="拡大">＋</button>
+        <button type="button" class="tool" id="btnZoomOut" aria-label="縮小" title="縮小">−</button>
+        <button type="button" class="tool" id="btnFit" aria-label="全体表示" title="全体表示">⤢</button>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </section>
+
+  <!-- ============ 分割バー ============ -->
+  <div class="divider" id="divider" role="separator" aria-orientation="horizontal" aria-label="表示領域の高さを調整">
+    <span class="grip"></span>
+  </div>
+
+  <!-- ============ 下段：メモ／チップ／AI連携 ============ -->
+  <section class="panel-wrap" id="panelWrap">
+
+    <div class="panel-head">
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab is-active" id="tabMemo" role="tab" aria-selected="true">メモ</button>
+        <button type="button" class="tab" id="tabChip" role="tab" aria-selected="false">チップ</button>
+        <button type="button" class="tab" id="tabAi" role="tab" aria-selected="false">AI連携</button>
+      </div>
+      <div class="head-meta">
+        <span class="count" id="memoCount">0文字</span>
+        <button type="button" class="btn btn-primary" id="btnMemoToChips">チップ化</button>
+        <button type="button" class="btn" id="btnClearMemo">クリア</button>
+        <span class="chip-name" id="chipName" hidden>未選択</span>
+      </div>
+    </div>
+
+    <div class="panel-body">
+      <!-- メモ -->
+      <div class="pane" id="paneMemo" role="tabpanel" aria-labelledby="tabMemo">
+        <textarea id="memoArea" class="field" placeholder="思いついたことをそのまま書いておく場所。マインドマップの補足でも、走り書きでも。"></textarea>
+      </div>
+
+      <!-- チップ編集 -->
+      <div class="pane" id="paneChip" role="tabpanel" aria-labelledby="tabChip" hidden>
+
+        <div class="chip-empty" id="chipEmpty">
+          <span class="big">チップが選ばれていません</span>
+          <span class="small">上のマインドマップでチップをタップすると、ここで文字・大きさ・色を編集できます。</span>
+        </div>
+
+        <div class="chip-controls" id="chipControls" hidden>
+          <label class="visually-hidden" for="chipText">チップの文字</label>
+          <textarea id="chipText" class="field" placeholder="チップに表示する文字"></textarea>
+
+          <div class="chip-row">
+            <span class="row-label">大きさ</span>
+            <div class="seg" id="sizeSeg">
+              <button type="button" data-s="1.64">小</button>
+              <button type="button" data-s="2">中</button>
+              <button type="button" data-s="2.5">大</button>
+              <button type="button" data-s="3.1">特大</button>
+            </div>
+          </div>
+
+          <div class="chip-row">
+            <span class="row-label">色</span>
+            <div class="swatches" id="swatches">
+              <button type="button" class="sw" data-color="plain"  aria-label="白" title="白"></button>
+              <button type="button" class="sw" data-color="blue"   aria-label="青" title="青"></button>
+              <button type="button" class="sw" data-color="green"  aria-label="緑" title="緑"></button>
+              <button type="button" class="sw" data-color="amber"  aria-label="黄" title="黄"></button>
+              <button type="button" class="sw" data-color="coral"  aria-label="赤" title="赤"></button>
+              <button type="button" class="sw" data-color="purple" aria-label="紫" title="紫"></button>
+              <button type="button" class="sw" data-color="gray"   aria-label="灰" title="灰"></button>
+            </div>
+          </div>
+
+          <div class="chip-actions">
+            <button type="button" class="mini" id="chipDup">複製</button>
+            <button type="button" class="mini" id="chipUnlink">線をすべて外す</button>
+            <button type="button" class="mini" id="chipDeselect">選択解除</button>
+            <button type="button" class="mini danger" id="chipDel">削除</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- AI連携 -->
+      <div class="pane pane-ai" id="paneAi" role="tabpanel" aria-labelledby="tabAi" hidden>
+        <div class="ai-scroll">
+
+          <div class="chip-row">
+            <span class="row-label">形式</span>
+            <div class="seg" id="aiFormatSeg">
+              <button type="button" data-fmt="md" class="is-active">Markdown</button>
+              <button type="button" data-fmt="json">JSON</button>
+            </div>
+            <button type="button" class="mini toggle" id="numToggle">番号を表示</button>
+          </div>
+
+          <label class="visually-hidden" for="aiOut">出力プレビュー</label>
+          <textarea id="aiOut" class="field ai-out" spellcheck="false"></textarea>
+
+          <div class="chip-actions">
+            <button type="button" class="mini primary" id="aiCopy">コピー</button>
+            <button type="button" class="mini" id="aiSave">ファイル保存</button>
+            <button type="button" class="mini" id="aiCopyPrompt">指示つきでコピー</button>
+          </div>
+
+          <div class="ai-sep">AIの返答を取り込む</div>
+
+          <label class="visually-hidden" for="aiIn">AIの返答</label>
+          <textarea id="aiIn" class="field ai-in" spellcheck="false" placeholder="AIが返した JSON もしくは Markdown の箇条書きをここに貼り付けます。"></textarea>
+
+          <div class="chip-actions">
+            <button type="button" class="mini primary" id="aiApply">地図に反映</button>
+            <button type="button" class="mini" id="aiClearIn">消去</button>
+          </div>
+
+          <p class="ai-note">
+            番号は木の枝ごとに 1、1-1、1-1-1 の階層番号で振られます。「番号を表示」でチップ上の番号を確認できます。
+            この番号を使えば「1-2 の下に案を3つ足して」のようにAIへ的確に指示できます。
+            AIには Markdown（またはJSON）を渡し、同じ形で返してもらうと、そのまま地図に反映できます。
+            位置情報のないデータは自動でツリー状に並べ直します。
+          </p>
+
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<input type="file" id="fileInput" accept=".json,.md,.markdown,.txt,application/json,text/markdown,text/plain" class="visually-hidden" />
+
+<script>
+(function () {
+  "use strict";
+
+  /* ============ constants ============ */
+  var WORLD_W = 3600, WORLD_H = 2600;
+  var KEY_MAP  = "seizu.map.v2";
+  var KEY_MEMO = "seizu.memo.v2";
+  var KEY_RATIO= "seizu.ratio.v2";
+  var KEY_NUM  = "seizu.num.v2";
+  var COLOR_KEYS = ["plain","blue","green","amber","coral","purple","gray"];
+  var SIZE_SCALE_VERSION = 4;   // この版でチップの大きさ基準を2倍にした
+  var MIN_SCALE = 0.8, MAX_SCALE = 4.2;
+
+  /* ============ dom ============ */
+  var app      = document.getElementById("app");
+  var topbar   = document.querySelector(".topbar");
+  var mapWrap  = document.getElementById("mapWrap");
+  var panelWrap= document.getElementById("panelWrap");
+  var divider  = document.getElementById("divider");
+  var viewport = document.getElementById("mapViewport");
+  var world    = document.getElementById("mapWorld");
+  var linksG   = document.getElementById("linksG");
+  var nodesLayer = document.getElementById("nodesLayer");
+  var toastEl  = document.getElementById("toast");
+
+  var tabMemo  = document.getElementById("tabMemo");
+  var tabChip  = document.getElementById("tabChip");
+  var tabAi    = document.getElementById("tabAi");
+  var paneMemo = document.getElementById("paneMemo");
+  var paneChip = document.getElementById("paneChip");
+  var paneAi   = document.getElementById("paneAi");
+  var memoCount= document.getElementById("memoCount");
+  var chipName = document.getElementById("chipName");
+  var btnClearMemo = document.getElementById("btnClearMemo");
+  var btnMemoToChips = document.getElementById("btnMemoToChips");
+  var memoEl   = document.getElementById("memoArea");
+
+  var chipEmpty   = document.getElementById("chipEmpty");
+  var chipControls= document.getElementById("chipControls");
+  var chipText    = document.getElementById("chipText");
+  var sizeSeg     = document.getElementById("sizeSeg");
+  var swatches    = document.getElementById("swatches");
+  var fileInput   = document.getElementById("fileInput");
+
+  var aiFormatSeg = document.getElementById("aiFormatSeg");
+  var aiOut       = document.getElementById("aiOut");
+  var aiIn        = document.getElementById("aiIn");
+  var numToggle   = document.getElementById("numToggle");
+
+  /* ============ state ============ */
+  function defaultState() {
+    var cx = WORLD_W / 2, cy = WORLD_H / 2;
+    return {
+      nodes: [
+        { id: "n1", x: cx,       y: cy,        text: "アイデア",     scale: 2.5, color: "blue" },
+        { id: "n2", x: cx - 360, y: cy - 190,  text: "やること",     scale: 2,   color: "plain" },
+        { id: "n3", x: cx + 360, y: cy - 150,  text: "気づき",       scale: 2,   color: "green" },
+        { id: "n4", x: cx + 60,  y: cy + 220,  text: "あとで調べる", scale: 2,   color: "amber" },
+        { id: "n5", x: cx - 380, y: cy + 200,  text: "メモ",         scale: 2,   color: "gray" }
+      ],
+      links: [["n1","n2"], ["n1","n3"], ["n1","n4"], ["n1","n5"]],
+      selected: null
+    };
+  }
+
+  var state = defaultState();
+  var view = { panX: 0, panY: 0, scale: 1 };
+  var ratio = 0.56;
+  var activeTab = "memo";
+  var nodeEls = {};
+  var toastTimer = null;
+  var seqMap = {};            // id -> 連番
+  var aiFormat = "md";
+  var showNum = false;
+
+  /* ============ helpers ============ */
+  function clampScale(s) {
+    var v = Number(s);
+    if (!isFinite(v) || v <= 0) return 2;
+    return Math.max(MIN_SCALE, Math.min(MAX_SCALE, v));
+  }
+  function getNode(id) {
+    for (var i = 0; i < state.nodes.length; i++) if (state.nodes[i].id === id) return state.nodes[i];
+    return null;
+  }
+  function nextId() {
+    var max = 0;
+    state.nodes.forEach(function (n) {
+      var m = /^n(\d+)$/.exec(n.id);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    });
+    return "n" + (max + 1);
+  }
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add("is-on");
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toastEl.classList.remove("is-on"); }, 1700);
+  }
+  function stamp() {
+    var d = new Date();
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "_" + p(d.getHours()) + p(d.getMinutes());
+  }
+
+  /* ============ persistence (auto) ============ */
+  function save() {
+    try { localStorage.setItem(KEY_MAP, JSON.stringify({ v: SIZE_SCALE_VERSION, nodes: state.nodes, links: state.links })); } catch (e) {}
+  }
+  function saveMemo() { try { localStorage.setItem(KEY_MEMO, memoEl.value); } catch (e) {} }
+  function saveRatio() { try { localStorage.setItem(KEY_RATIO, String(ratio)); } catch (e) {} }
+
+  function normalizeNode(raw, i) {
+    if (!raw || typeof raw !== "object") return null;
+    var id = (raw.id != null) ? String(raw.id) : ("n" + (i + 1));
+    var x = Number(raw.x); if (!isFinite(x)) x = WORLD_W / 2;
+    var y = Number(raw.y); if (!isFinite(y)) y = WORLD_H / 2;
+    var text = (raw.text != null) ? String(raw.text) : "";
+    var scale = clampScale(raw.scale);
+    var color = (typeof raw.color === "string" && COLOR_KEYS.indexOf(raw.color) >= 0) ? raw.color : "plain";
+    return { id: id, x: x, y: y, text: text, scale: scale, color: color };
+  }
+
+  function loadLocal() {
+    try {
+      var raw = localStorage.getItem(KEY_MAP);
+      if (raw) {
+        var d = JSON.parse(raw);
+        if (d && Array.isArray(d.nodes)) {
+          var dv = Number(d.v || d.version || 0);
+          var dmult = (dv < SIZE_SCALE_VERSION) ? 2 : 1;
+          state.nodes = d.nodes.map(function (raw, i) {
+            var n = normalizeNode(raw, i);
+            if (n && dmult !== 1) n.scale = clampScale(n.scale * dmult);
+            return n;
+          }).filter(Boolean);
+          var ids = {}; state.nodes.forEach(function (n) { ids[n.id] = 1; });
+          state.links = (Array.isArray(d.links) ? d.links : [])
+            .filter(function (l) { return Array.isArray(l) && l.length >= 2 && ids[l[0]] && ids[l[1]] && l[0] !== l[1]; })
+            .map(function (l) { return [String(l[0]), String(l[1])]; });
+        }
+      }
+    } catch (e) {}
+    try {
+      var r = parseFloat(localStorage.getItem(KEY_RATIO));
+      if (!isNaN(r)) ratio = Math.max(0.28, Math.min(0.78, r));
+    } catch (e2) {}
+    try { showNum = localStorage.getItem(KEY_NUM) === "1"; } catch (e3) {}
+  }
+
+  /* ============ view transform ============ */
+  function applyView() {
+    world.style.transform = "translate(" + view.panX + "px," + view.panY + "px) scale(" + view.scale + ")";
+  }
+  function toWorld(clientX, clientY) {
+    var r = viewport.getBoundingClientRect();
+    return { x: (clientX - r.left - view.panX) / view.scale, y: (clientY - r.top - view.panY) / view.scale };
+  }
+  function viewCenterWorld() {
+    var r = viewport.getBoundingClientRect();
+    return toWorld(r.left + r.width / 2, r.top + r.height / 2);
+  }
+  function fitView() {
+    if (!state.nodes.length) return;
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    state.nodes.forEach(function (n) {
+      if (n.x < minX) minX = n.x; if (n.y < minY) minY = n.y;
+      if (n.x > maxX) maxX = n.x; if (n.y > maxY) maxY = n.y;
+    });
+    var pad = 260;
+    minX -= pad; maxX += pad; minY -= pad; maxY += pad;
+    var vw = viewport.clientWidth, vh = viewport.clientHeight;
+    if (!vw || !vh) return;
+    var sc = Math.min(vw / (maxX - minX), vh / (maxY - minY));
+    sc = Math.max(0.35, Math.min(1.35, sc));
+    view.scale = sc;
+    view.panX = (vw - (minX + maxX) * sc) / 2;
+    view.panY = (vh - (minY + maxY) * sc) / 2;
+    applyView(); renderLinks();
+  }
+  function zoomAt(factor, cx, cy) {
+    var r = viewport.getBoundingClientRect();
+    var px = (cx === undefined) ? r.width / 2 : (cx - r.left);
+    var py = (cy === undefined) ? r.height / 2 : (cy - r.top);
+    var wx = (px - view.panX) / view.scale;
+    var wy = (py - view.panY) / view.scale;
+    var ns = Math.max(0.28, Math.min(2.6, view.scale * factor));
+    view.scale = ns;
+    view.panX = px - wx * ns;
+    view.panY = py - wy * ns;
+    applyView(); renderLinks();
+  }
+
+  /* ============ 連番の計算（連結をたどった順） ============ */
+  function computeFlow() {
+    var adj = {}, nodeById = {};
+    state.nodes.forEach(function (n) { adj[n.id] = []; nodeById[n.id] = n; });
+    state.links.forEach(function (l) {
+      if (adj[l[0]] && adj[l[1]]) { adj[l[0]].push(l[1]); adj[l[1]].push(l[0]); }
+    });
+    var visited = {}, order = [], parent = {};
+    function bfs(start) {
+      var q = [start]; visited[start] = true; parent[start] = null;
+      while (q.length) {
+        var cur = q.shift(); order.push(cur);
+        adj[cur].forEach(function (nb) {
+          if (!visited[nb]) { visited[nb] = true; parent[nb] = cur; q.push(nb); }
+        });
+      }
+    }
+    state.nodes.forEach(function (n) { if (!visited[n.id]) bfs(n.id); });
+
+    var children = {};
+    order.forEach(function (id) { children[id] = []; });
+    order.forEach(function (id) { if (parent[id]) children[parent[id]].push(id); });
+    var roots = order.filter(function (id) { return !parent[id]; });
+
+    // 階層番号：根は 1,2,3…、子は 親番号-枝番（1-1, 1-1-1）で採番する
+    var label = {};
+    function assign(id, lab) {
+      label[id] = lab;
+      children[id].forEach(function (c, k) { assign(c, lab + "-" + (k + 1)); });
+    }
+    roots.forEach(function (r, i) { assign(r, String(i + 1)); });
+    order.forEach(function (id, i) { if (label[id] == null) label[id] = String(i + 1); });
+
+    return { order: order, seq: label, parent: parent, children: children, roots: roots, nodeById: nodeById };
+  }
+
+  function currentFlow() { return computeFlow(); }
+
+  /* ============ serialize ============ */
+  function toJson(flow) {
+    var nodes = flow.order.map(function (id) {
+      var n = flow.nodeById[id];
+      return { id: flow.seq[id], text: n.text, color: n.color, scale: n.scale, x: Math.round(n.x), y: Math.round(n.y) };
+    });
+    var edges = state.links.map(function (l) { return [flow.seq[l[0]], flow.seq[l[1]]]; });
+    return JSON.stringify({
+      format: "seizu-flow", version: SIZE_SCALE_VERSION, generatedAt: new Date().toISOString(),
+      idScheme: "hierarchy", note: "id は 1 / 1-1 / 1-1-1 の階層番号",
+      nodes: nodes, edges: edges
+    }, null, 2);
+  }
+
+  function toMarkdown(flow) {
+    var lines = [];
+    function walk(id, depth) {
+      var n = flow.nodeById[id];
+      var txt = String(n.text || "無題").replace(/\s*\n\s*/g, " / ");
+      lines.push(new Array(depth + 1).join("  ") + "- [" + flow.seq[id] + "] " + txt);
+      flow.children[id].forEach(function (c) { walk(c, depth + 1); });
+    }
+    flow.roots.forEach(function (r) { walk(r, 0); });
+    return lines.join("\n") + "\n";
+  }
+
+  function promptWrapper(flow) {
+    var md = toMarkdown(flow);
+    return [
+      "あなたは思考整理の補助をします。以下はマインドマップの構造を番号つきのMarkdownで表したものです。",
+      "内容を整理・具体化・追加し、次のJSON形式 ONLY で返してください（前後に説明文を付けない）。",
+      '{"format":"seizu-flow","version":4,"idScheme":"hierarchy","nodes":[{"id":"1","text":"...","color":"blue","scale":2},{"id":"1-1","text":"...","color":"plain","scale":2}],"edges":[["1","1-1"]]}',
+      "・id は階層番号の文字列。根は 1,2,3…、子は 親-枝番 で 1-1、その子は 1-1-1。",
+      "・edges は [親id, 子id] の組（枝をまたぐ関連線も同じ形式で可）。",
+      "・color は plain/blue/green/amber/coral/purple/gray のいずれか。scale は 1.64〜3.1（標準は2）。",
+      "・位置 x,y は省略してよい（アプリ側で自動配置します）。",
+      "",
+      "--- マップ（Markdown） ---",
+      md
+    ].join("\n");
+  }
+
+  /* ============ 取り込み（JSON / Markdown） ============ */
+  function radialLayout(items, links) {
+    var n = items.length, adj = [], i;
+    for (i = 0; i < n; i++) adj.push([]);
+    links.forEach(function (l) { if (l[0] < n && l[1] < n) { adj[l[0]].push(l[1]); adj[l[1]].push(l[0]); } });
+    var visited = new Array(n).fill(false), parent = new Array(n).fill(-1), order = [];
+    function bfs(s) {
+      var q = [s]; visited[s] = true;
+      while (q.length) {
+        var c = q.shift(); order.push(c);
+        adj[c].forEach(function (nb) { if (!visited[nb]) { visited[nb] = true; parent[nb] = c; q.push(nb); } });
+      }
+    }
+    for (i = 0; i < n; i++) if (!visited[i]) bfs(i);
+    var children = [], depth = new Array(n).fill(0);
+    for (i = 0; i < n; i++) children.push([]);
+    for (i = 0; i < n; i++) if (parent[i] >= 0) { children[parent[i]].push(i); depth[i] = depth[parent[i]] + 1; }
+    var roots = [];
+    for (i = 0; i < n; i++) if (parent[i] < 0) roots.push(i);
+    function leaves(id) {
+      if (!children[id].length) return 1;
+      var s = 0; children[id].forEach(function (c) { s += leaves(c); }); return s;
+    }
+    var cx = WORLD_W / 2, cy = WORLD_H / 2, R = 250;
+    var pos = new Array(n);
+    var singleRoot = roots.length === 1;
+    function place(id, d, a0, a1) {
+      var ang = (a0 + a1) / 2;
+      if (d === 0) pos[id] = { x: cx, y: cy };
+      else pos[id] = { x: cx + Math.cos(ang) * d * R, y: cy + Math.sin(ang) * d * R };
+      var kids = children[id];
+      if (!kids.length) return;
+      var ws = kids.map(function (c) { return leaves(c); });
+      var sum = ws.reduce(function (a, b) { return a + b; }, 0) || 1;
+      var cur = a0;
+      kids.forEach(function (c, idx) {
+        var span = (a1 - a0) * (ws[idx] / sum);
+        place(c, d + 1, cur, cur + span); cur += span;
+      });
+    }
+    if (roots.length) {
+      if (singleRoot) {
+        place(roots[0], 0, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2);
+      } else {
+        var rw = roots.map(function (r) { return leaves(r); });
+        var rsum = rw.reduce(function (a, b) { return a + b; }, 0) || 1;
+        var cur = -Math.PI / 2;
+        roots.forEach(function (r, idx) {
+          var span = Math.PI * 2 * (rw[idx] / rsum);
+          place(r, 1, cur, cur + span); cur += span;
+        });
+      }
+    }
+    return pos;
+  }
+
+  function buildFromItems(items, links) {
+    items.forEach(function (it) { if (it.text == null) it.text = ""; });
+    var hasPos = items.length > 0;
+    for (var i = 0; i < items.length; i++) {
+      if (!(isFinite(items[i].x) && isFinite(items[i].y))) { hasPos = false; break; }
+    }
+    if (!hasPos) {
+      var pos = radialLayout(items, links);
+      items.forEach(function (it, i) { it.x = pos[i].x; it.y = pos[i].y; });
+    }
+    var newNodes = [], newLinks = [], idMap = [];
+    items.forEach(function (it, i) {
+      var nid = "n" + (i + 1);
+      idMap.push(nid);
+      newNodes.push({
+        id: nid,
+        x: Math.round(it.x), y: Math.round(it.y),
+        text: String(it.text == null ? "無題" : it.text),
+        scale: clampScale(it.scale),
+        color: (COLOR_KEYS.indexOf(it.color) >= 0 ? it.color : "plain")
+      });
+    });
+    links.forEach(function (l) {
+      if (l[0] !== l[1] && idMap[l[0]] && idMap[l[1]]) newLinks.push([idMap[l[0]], idMap[l[1]]]);
+    });
+    return { nodes: newNodes, links: newLinks };
+  }
+
+  function parseJsonImport(txt) {
+    var d = JSON.parse(txt);
+    var items = [], links = [];
+    var ver = 0;
+    if (d && typeof d === "object" && !Array.isArray(d)) ver = Number(d.version || 0);
+    var mult = (ver < SIZE_SCALE_VERSION) ? 2 : 1;
+
+    function flatten(node, parentIdx) {
+      if (node == null) return -1;
+      var text = (node.text != null ? node.text : (node.name != null ? node.name : (node.title != null ? node.title : "")));
+      var idx = items.length;
+      items.push({
+        text: String(text),
+        color: node.color,
+        scale: Number(node.scale),
+        x: Number(node.x), y: Number(node.y)
+      });
+      if (parentIdx >= 0) links.push([parentIdx, idx]);
+      var kids = node.children || node.nodes || node.items;
+      if (Array.isArray(kids)) kids.forEach(function (k) { flatten(k, idx); });
+      return idx;
+    }
+
+    if (Array.isArray(d)) {
+      if (d.length && d.some(function (x) { return x && typeof x === "object" && Array.isArray(x.children); })) {
+        d.forEach(function (x) { flatten(x, -1); });
+      } else {
+        return parseNodesEdges(d, [], items, links, 1);
+      }
+    } else if (d && typeof d === "object") {
+      if (Array.isArray(d.nodes)) {
+        return parseNodesEdges(d.nodes, d.edges || d.links || [], items, links, mult);
+      }
+      if (d.root && typeof d.root === "object") { flatten(d.root, -1); }
+      else if (Array.isArray(d.children) || d.text != null) { flatten(d, -1); }
+      else throw new Error("unknown");
+    } else throw new Error("unknown");
+
+    if (mult !== 1) items.forEach(function (it) { if (isFinite(it.scale)) it.scale = clampScale(it.scale * mult); });
+    var built = buildFromItems(items, links);
+    var memo = (d && typeof d.memo === "string") ? d.memo : undefined;
+    var ratioV = (d && typeof d.ratio === "number") ? d.ratio : undefined;
+    return { nodes: built.nodes, links: built.links, memo: memo, ratio: ratioV };
+  }
+
+  function parseNodesEdges(nodesRaw, edgesRaw, items, links, mult) {
+    if (mult === undefined) mult = 1;
+    var idToIdx = {};
+    nodesRaw.forEach(function (nr, i) {
+      if (nr == null) return;
+      var key = (typeof nr === "object" && nr.id != null) ? String(nr.id) : String(i);
+      var text = "";
+      if (typeof nr === "object") {
+        text = (nr.text != null ? nr.text : (nr.name != null ? nr.name : (nr.title != null ? nr.title : "")));
+      } else { text = String(nr); }
+      idToIdx[key] = items.length;
+      var sc = (typeof nr === "object") ? Number(nr.scale) : NaN;
+      if (isFinite(sc) && mult !== 1) sc = sc * mult;
+      items.push({
+        text: String(text),
+        color: (typeof nr === "object" ? nr.color : undefined),
+        scale: (isFinite(sc) ? sc : undefined),
+        x: (typeof nr === "object" ? Number(nr.x) : NaN),
+        y: (typeof nr === "object" ? Number(nr.y) : NaN)
+      });
+    });
+    (edgesRaw || []).forEach(function (e) {
+      if (e == null) return;
+      var a, b;
+      if (Array.isArray(e)) { a = String(e[0]); b = String(e[1]); }
+      else if (typeof e === "object") {
+        var f = (e.from != null ? e.from : (e.source != null ? e.source : e.parent));
+        var t = (e.to != null ? e.to : (e.target != null ? e.target : e.child));
+        a = String(f); b = String(t);
+      }
+      if (a != null && b != null && idToIdx[a] != null && idToIdx[b] != null && a !== b) {
+        links.push([idToIdx[a], idToIdx[b]]);
+      }
+    });
+    var built = buildFromItems(items, links);
+    return { nodes: built.nodes, links: built.links };
+  }
+
+  function parseMarkdownImport(txt) {
+    var lines = txt.split(/\r?\n/);
+    var items = [], links = [], stack = [];
+    lines.forEach(function (line) {
+      if (!line.trim()) return;
+      var depth = null, text = null, m;
+      var hm = /^(#{1,6})\s+(.*)$/.exec(line);
+      if (hm) { depth = hm[1].length - 1; text = hm[2]; }
+      else {
+        var bm = /^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$/.exec(line);
+        if (bm) {
+          var indent = bm[1].replace(/\t/g, "  ").length;
+          depth = Math.floor(indent / 2); text = bm[2];
+        } else if (!items.length) { depth = 0; text = line.trim(); }
+        else return;
+      }
+      text = String(text).replace(/^\[[^\]]*\]\s*/, "").trim();
+      if (!text) return;
+      var idx = items.length;
+      items.push({ text: text, x: NaN, y: NaN });
+      var parentIdx = -1;
+      for (var s = stack.length - 1; s >= 0; s--) { if (stack[s].depth < depth) { parentIdx = stack[s].index; break; } }
+      if (parentIdx >= 0) links.push([parentIdx, idx]);
+      while (stack.length && stack[stack.length - 1].depth >= depth) stack.pop();
+      stack.push({ depth: depth, index: idx });
+    });
+    if (!items.length) throw new Error("empty");
+    var built = buildFromItems(items, links);
+    return { nodes: built.nodes, links: built.links };
+  }
+
+  function parseImport(txt) {
+    var t = String(txt || "").trim();
+    if (!t) throw new Error("empty");
+    if (t[0] === "{" || t[0] === "[") return parseJsonImport(t);
+    return parseMarkdownImport(t);
+  }
+
+  /* ============ render ============ */
+  function renderNodes() {
+    var seen = {};
+    state.nodes.forEach(function (n) {
+      seen[n.id] = true;
+      var el = nodeEls[n.id];
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "node";
+        el.setAttribute("data-id", n.id);
+        el.setAttribute("role", "button");
+        el.setAttribute("tabindex", "0");
+        var span = document.createElement("span");
+        span.className = "node-text";
+        var badge = document.createElement("span");
+        badge.className = "node-badge";
+        el.appendChild(span); el.appendChild(badge);
+        el._text = span; el._badge = badge;
+        el.addEventListener("pointerdown", onNodePointerDown);
+        el.addEventListener("keydown", onNodeKeyDown);
+        nodesLayer.appendChild(el);
+        nodeEls[n.id] = el;
+      }
+      el.style.left = n.x + "px";
+      el.style.top  = n.y + "px";
+      el.style.setProperty("--ns", String(n.scale));
+      for (var i = 0; i < COLOR_KEYS.length; i++) el.classList.remove("col-" + COLOR_KEYS[i]);
+      el.classList.add("col-" + n.color);
+      el._text.textContent = n.text;
+      el._badge.textContent = seqMap[n.id] != null ? String(seqMap[n.id]) : "";
+      var sel = (state.selected === n.id);
+      el.classList.toggle("is-selected", sel);
+      el.setAttribute("aria-label", "チップ " + (n.text || "無題") + (seqMap[n.id] ? "、番号" + seqMap[n.id] : "") + (sel ? "（選択中）" : ""));
+    });
+    Object.keys(nodeEls).forEach(function (id) {
+      if (!seen[id]) { nodeEls[id].remove(); delete nodeEls[id]; }
+    });
+  }
+
+  function linkPath(a, b) {
+    var dx = b.x - a.x, dy = b.y - a.y;
+    var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    var off = Math.min(46, dist * 0.15);
+    var px = (-dy / dist) * off, py = (dx / dist) * off;
+    return "M " + a.x + " " + a.y + " Q " + (mx + px) + " " + (my + py) + " " + b.x + " " + b.y;
+  }
+  function renderLinks() {
+    var byId = {};
+    state.nodes.forEach(function (n) { byId[n.id] = n; });
+    var parts = [];
+    var dotR = 4 / view.scale;
+    state.links.forEach(function (l) {
+      var a = byId[l[0]], b = byId[l[1]];
+      if (!a || !b) return;
+      parts.push('<path class="link" d="' + linkPath(a, b) + '"></path>');
+      parts.push('<circle class="link-dot" cx="' + ((a.x + b.x) / 2) + '" cy="' + ((a.y + b.y) / 2) + '" r="' + dotR.toFixed(2) + '"></circle>');
+    });
+    linksG.innerHTML = parts.join("");
+    linksG.setAttribute("stroke-width", (2.4 / view.scale).toFixed(3));
+  }
+
+  /* ============ tabs & chip UI ============ */
+  function setTab(name) {
+    activeTab = name;
+    paneMemo.hidden = (name !== "memo");
+    paneChip.hidden = (name !== "chip");
+    paneAi.hidden   = (name !== "ai");
+    tabMemo.classList.toggle("is-active", name === "memo");
+    tabChip.classList.toggle("is-active", name === "chip");
+    tabAi.classList.toggle("is-active", name === "ai");
+    tabMemo.setAttribute("aria-selected", name === "memo" ? "true" : "false");
+    tabChip.setAttribute("aria-selected", name === "chip" ? "true" : "false");
+    tabAi.setAttribute("aria-selected", name === "ai" ? "true" : "false");
+    memoCount.hidden = (name !== "memo");
+    btnClearMemo.hidden = (name !== "memo");
+    btnMemoToChips.hidden = (name !== "memo");
+    chipName.hidden = (name !== "chip");
+    if (name === "chip") syncChipUI();
+    if (name === "ai") updateAiOutput();
+  }
+
+  function syncChipUI() {
+    var n = state.selected ? getNode(state.selected) : null;
+    if (!n) {
+      chipEmpty.hidden = false; chipControls.hidden = true;
+      tabChip.classList.remove("is-flagged");
+      chipName.textContent = "未選択";
+      return;
+    }
+    chipEmpty.hidden = true; chipControls.hidden = false;
+    tabChip.classList.add("is-flagged");
+    chipName.textContent = n.text ? (n.text.length > 12 ? n.text.slice(0, 12) + "…" : n.text) : "無題";
+    if (document.activeElement !== chipText) chipText.value = n.text;
+    var btns = sizeSeg.querySelectorAll("button");
+    for (var i = 0; i < btns.length; i++) {
+      var s = parseFloat(btns[i].getAttribute("data-s"));
+      btns[i].classList.toggle("is-active", Math.abs(s - n.scale) < 0.02);
+    }
+    var sws = swatches.querySelectorAll(".sw");
+    for (var j = 0; j < sws.length; j++) sws[j].classList.toggle("is-active", sws[j].getAttribute("data-color") === n.color);
+  }
+
+  function refresh() {
+    var flow = currentFlow();
+    seqMap = flow.seq;
+    renderNodes();
+    renderLinks();
+    syncChipUI();
+    if (activeTab === "ai") updateAiOutput();
+  }
+
+  /* ============ AI pane ============ */
+  function updateAiOutput() {
+    var flow = currentFlow();
+    aiOut.value = (aiFormat === "json") ? toJson(flow) : toMarkdown(flow);
+    seqMap = flow.seq;
+    if (showNum) renderNodes();
+  }
+
+  aiFormatSeg.addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+    aiFormat = btn.getAttribute("data-fmt");
+    var bs = aiFormatSeg.querySelectorAll("button");
+    for (var i = 0; i < bs.length; i++) bs[i].classList.toggle("is-active", bs[i] === btn);
+    updateAiOutput();
+  });
+
+  numToggle.addEventListener("click", function () {
+    showNum = !showNum;
+    numToggle.classList.toggle("is-active", showNum);
+    document.body.classList.toggle("show-num", showNum);
+    try { localStorage.setItem(KEY_NUM, showNum ? "1" : "0"); } catch (e) {}
+    renderNodes();
+  });
+
+  function copyAi(str, okMsg) {
+    aiOut.value = str;
+    function fallback() {
+      try {
+        aiOut.focus(); aiOut.select();
+        var ok = document.execCommand && document.execCommand("copy");
+        toast(ok ? (okMsg || "コピーしました") : "長押しでコピーしてください");
+      } catch (e) { toast("長押しでコピーしてください"); }
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(str).then(function () { toast(okMsg || "コピーしました"); }, fallback);
+    } else fallback();
+  }
+
+  document.getElementById("aiCopy").addEventListener("click", function () {
+    var flow = currentFlow();
+    copyAi(aiFormat === "json" ? toJson(flow) : toMarkdown(flow), "コピーしました");
+  });
+
+  document.getElementById("aiCopyPrompt").addEventListener("click", function () {
+    var flow = currentFlow();
+    copyAi(promptWrapper(flow), "指示つきでコピーしました");
+  });
+
+  document.getElementById("aiSave").addEventListener("click", function () {
+    var flow = currentFlow();
+    var isJson = (aiFormat === "json");
+    var text = isJson ? toJson(flow) : toMarkdown(flow);
+    var blob = new Blob([text], { type: isJson ? "application/json" : "text/markdown" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "思考整理マップ_" + stamp() + (isJson ? ".json" : ".md");
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+    toast("ファイルを書き出しました");
+  });
+
+  document.getElementById("aiApply").addEventListener("click", function () {
+    var txt = aiIn.value.trim();
+    if (!txt) { toast("取り込む内容がありません"); return; }
+    var data;
+    try { data = parseImport(txt); }
+    catch (e) { toast("形式を読み取れませんでした"); return; }
+    if (!data.nodes.length) { toast("チップがありません"); return; }
+    if (!window.confirm("今のマインドマップを、取り込んだ内容で置き換えます。よろしいですか？")) return;
+    applyImport(data);
+    aiIn.value = "";
+    toast("地図に反映しました");
+  });
+
+  document.getElementById("aiClearIn").addEventListener("click", function () {
+    aiIn.value = ""; aiIn.focus();
+  });
+
+  /* ============ interactions: node ============ */
+  function onNodePointerDown(e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    var el = e.currentTarget;
+    var id = el.getAttribute("data-id");
+    var node = getNode(id);
+    if (!node) return;
+
+    var start = toWorld(e.clientX, e.clientY);
+    var originX = node.x, originY = node.y;
+    var lastX = e.clientX, lastY = e.clientY;
+    var moved = 0;
+
+    try { el.setPointerCapture(e.pointerId); } catch (err) {}
+    el.classList.add("is-dragging");
+
+    function onMove(ev) {
+      if (pinchState) return;
+      moved += Math.abs(ev.clientX - lastX) + Math.abs(ev.clientY - lastY);
+      lastX = ev.clientX; lastY = ev.clientY;
+      var w = toWorld(ev.clientX, ev.clientY);
+      node.x = originX + (w.x - start.x);
+      node.y = originY + (w.y - start.y);
+      el.style.left = node.x + "px";
+      el.style.top = node.y + "px";
+      renderLinks();
+    }
+    function onUp() {
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onUp);
+      try { el.releasePointerCapture(e.pointerId); } catch (err) {}
+      el.classList.remove("is-dragging");
+      if (suppressTap) return;
+      if (moved < 9) handleTap(id); else save();
+    }
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+    el.addEventListener("pointercancel", onUp);
+    e.stopPropagation();
+  }
+
+  function onNodeKeyDown(e) {
+    var id = e.currentTarget.getAttribute("data-id");
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleTap(id); }
+    else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteNode(id); }
+  }
+
+  function handleTap(id) {
+    var sel = state.selected;
+    if (sel === id) {
+      state.selected = null; refresh();
+      if (activeTab !== "chip") setTab("chip");
+      return;
+    }
+    if (sel === null || !getNode(sel)) {
+      state.selected = id; refresh(); setTab("chip"); return;
+    }
+    var linked = toggleLink(sel, id);
+    state.selected = id;
+    toast(linked ? "線でつなぎました" : "線を外しました");
+    refresh(); save(); setTab("chip");
+  }
+
+  function toggleLink(a, b) {
+    if (a === b) return false;
+    for (var i = 0; i < state.links.length; i++) {
+      var l = state.links[i];
+      if ((l[0] === a && l[1] === b) || (l[0] === b && l[1] === a)) { state.links.splice(i, 1); return false; }
+    }
+    state.links.push([a, b]); return true;
+  }
+
+  /* ============ gestures: 1本指パン / 2本指ピンチ ============ */
+  var pointers = {};
+  var pinchState = null;
+  var suppressTap = false;
+
+  function vpLocal(clientX, clientY) {
+    var r = viewport.getBoundingClientRect();
+    return { x: clientX - r.left, y: clientY - r.top };
+  }
+  function pointerList() {
+    return Object.keys(pointers).map(function (k) { return pointers[k]; });
+  }
+  function beginPinch() {
+    var ps = pointerList();
+    if (ps.length < 2) return;
+    var a = ps[0], b = ps[1];
+    var mid = vpLocal((a.x + b.x) / 2, (a.y + b.y) / 2);
+    pinchState = {
+      startDist: Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)) || 1,
+      startScale: view.scale,
+      wx: (mid.x - view.panX) / view.scale,
+      wy: (mid.y - view.panY) / view.scale
+    };
+    suppressTap = true;
+    world.style.transition = "none";
+  }
+  function doPinch() {
+    if (!pinchState) return;
+    var ps = pointerList();
+    if (ps.length < 2) return;
+    var a = ps[0], b = ps[1];
+    var dist = Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)) || 1;
+    var mid = vpLocal((a.x + b.x) / 2, (a.y + b.y) / 2);
+    var ns = Math.max(0.28, Math.min(2.6, pinchState.startScale * (dist / pinchState.startDist)));
+    view.scale = ns;
+    view.panX = mid.x - pinchState.wx * ns;
+    view.panY = mid.y - pinchState.wy * ns;
+    applyView(); renderLinks();
+  }
+  function endPinch() { pinchState = null; }
+
+  viewport.addEventListener("pointerdown", function (e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+    var ids = Object.keys(pointers);
+    if (ids.length >= 2) beginPinch();
+    else if (ids.length === 1) suppressTap = false;
+  }, true);
+
+  window.addEventListener("pointermove", function (e) {
+    if (pointers[e.pointerId]) { pointers[e.pointerId].x = e.clientX; pointers[e.pointerId].y = e.clientY; }
+    if (pinchState) doPinch();
+  }, true);
+
+  window.addEventListener("pointerup", function (e) {
+    if (pointers[e.pointerId]) delete pointers[e.pointerId];
+    if (pinchState && Object.keys(pointers).length < 2) { endPinch(); suppressTap = true; }
+  }, true);
+  window.addEventListener("pointercancel", function (e) {
+    if (pointers[e.pointerId]) delete pointers[e.pointerId];
+    if (pinchState && Object.keys(pointers).length < 2) { endPinch(); suppressTap = true; }
+  }, true);
+
+  /* 1本指パン */
+  viewport.addEventListener("pointerdown", function (e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    var t = e.target;
+    if (t && t.closest && t.closest(".node")) return;
+
+    var startX = e.clientX, startY = e.clientY;
+    var p0x = view.panX, p0y = view.panY;
+    var moved = 0;
+    try { viewport.setPointerCapture(e.pointerId); } catch (err) {}
+    viewport.classList.add("is-panning");
+
+    function onMove(ev) {
+      if (pinchState) return;
+      moved += Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY);
+      view.panX = p0x + (ev.clientX - startX);
+      view.panY = p0y + (ev.clientY - startY);
+      applyView();
+    }
+    function onUp() {
+      viewport.removeEventListener("pointermove", onMove);
+      viewport.removeEventListener("pointerup", onUp);
+      viewport.removeEventListener("pointercancel", onUp);
+      try { viewport.releasePointerCapture(e.pointerId); } catch (err) {}
+      viewport.classList.remove("is-panning");
+      if (suppressTap) return;
+      if (moved < 9 && state.selected !== null) { state.selected = null; refresh(); }
+    }
+    viewport.addEventListener("pointermove", onMove);
+    viewport.addEventListener("pointerup", onUp);
+    viewport.addEventListener("pointercancel", onUp);
+  });
+
+  viewport.addEventListener("wheel", function (e) {
+    if (!e.ctrlKey && !e.metaKey && Math.abs(e.deltaY) < 4) return;
+    e.preventDefault();
+    zoomAt(e.deltaY < 0 ? 1.12 : 0.89, e.clientX, e.clientY);
+  }, { passive: false });
+
+  /* ============ node actions ============ */
+  function deleteNode(id) {
+    var node = getNode(id);
+    if (!node) {
+      toast("先にチップを選択してください");
+      setTab("chip");
+      return;
+    }
+    // スマホのファイル表示やホーム画面ショートカットでは confirm が
+    // ブロックされる場合があるため、削除ボタンは直接実行する。
+    state.nodes = state.nodes.filter(function (n) { return n.id !== id; });
+    state.links = state.links.filter(function (l) { return l[0] !== id && l[1] !== id; });
+    if (state.selected === id) state.selected = null;
+    refresh();
+    save();
+    setTab("chip");
+    toast("チップを削除しました");
+  }
+
+  function duplicateNode(node) {
+    if (!node) return;
+    var n = { id: nextId(), x: node.x + 74, y: node.y + 74, text: node.text, scale: node.scale, color: node.color };
+    state.nodes.push(n);
+    state.selected = n.id;
+    refresh(); save(); toast("複製しました");
+  }
+
+  function unlinkNode(id) {
+    var before = state.links.length;
+    state.links = state.links.filter(function (l) { return l[0] !== id && l[1] !== id; });
+    refresh(); save();
+    toast(before === state.links.length ? "線はありません" : "線をすべて外しました");
+  }
+
+  function addNode() {
+    var c = viewCenterWorld();
+    var n = { id: nextId(), x: Math.round(c.x), y: Math.round(c.y), text: "", scale: 2, color: "plain" };
+    state.nodes.push(n);
+    state.selected = n.id;
+    refresh(); save(); setTab("chip");
+    setTimeout(function () { chipText.focus(); chipText.select(); }, 40);
+  }
+
+  /* ============ chip editor wiring ============ */
+  var chipTimer = null;
+  chipText.addEventListener("input", function () {
+    var n = getNode(state.selected);
+    if (!n) return;
+    n.text = chipText.value;
+    var el = nodeEls[n.id];
+    if (el && el._text) el._text.textContent = n.text;
+    chipName.textContent = n.text ? (n.text.length > 12 ? n.text.slice(0, 12) + "…" : n.text) : "無題";
+    if (chipTimer) clearTimeout(chipTimer);
+    chipTimer = setTimeout(save, 350);
+  });
+
+  sizeSeg.addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+    var n = getNode(state.selected);
+    if (!n) return;
+    n.scale = parseFloat(btn.getAttribute("data-s")) || 1;
+    refresh(); save();
+  });
+
+  swatches.addEventListener("click", function (e) {
+    var btn = e.target.closest(".sw");
+    if (!btn) return;
+    var n = getNode(state.selected);
+    if (!n) return;
+    n.color = btn.getAttribute("data-color");
+    refresh(); save();
+  });
+
+  document.getElementById("chipDup").addEventListener("click", function () { duplicateNode(getNode(state.selected)); });
+  document.getElementById("chipUnlink").addEventListener("click", function () { if (state.selected) unlinkNode(state.selected); });
+  document.getElementById("chipDel").addEventListener("click", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    deleteNode(state.selected);
+  });
+  document.getElementById("chipDeselect").addEventListener("click", function () { state.selected = null; refresh(); toast("選択を解除しました"); });
+
+  document.getElementById("btnAdd").addEventListener("click", addNode);
+  document.getElementById("btnZoomIn").addEventListener("click", function () { zoomAt(1.25); });
+  document.getElementById("btnZoomOut").addEventListener("click", function () { zoomAt(0.8); });
+  document.getElementById("btnFit").addEventListener("click", function () { fitView(); });
+
+  tabMemo.addEventListener("click", function () { setTab("memo"); });
+  tabChip.addEventListener("click", function () { setTab("chip"); });
+  tabAi.addEventListener("click", function () { setTab("ai"); });
+
+  /* ============ メモをチップ化 ============ */
+  // メモを1行ずつ読み取り、字下げや行頭記号から親子関係を組み立てる
+  function parseMemoLines(text) {
+    var items = [], links = [], stack = [];
+    text.split(/\r?\n/).forEach(function (line) {
+      if (!line.trim()) return;
+      var head = /^\s*(#{1,6})\s+/.exec(line);
+      var depth;
+      if (head) {
+        depth = head[1].length - 1;
+      } else {
+        depth = Math.floor(/^\s*/.exec(line)[0].replace(/\t/g, "  ").length / 2);
+      }
+      var t = line.trim()
+        .replace(/^#{1,6}\s+/, "")
+        .replace(/^[-*+•・]\s+/, "")
+        .replace(/^\d+[.)]\s+/, "")
+        .replace(/^\[[ xX]\]\s+/, "");
+      t = t.replace(/\*\*(.+?)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1").trim();
+      if (!t) return;
+
+      var idx = items.length;
+      items.push({ text: t, x: NaN, y: NaN });
+      var parentIdx = -1;
+      for (var s = stack.length - 1; s >= 0; s--) {
+        if (stack[s].depth < depth) { parentIdx = stack[s].index; break; }
+      }
+      if (parentIdx >= 0) links.push([parentIdx, idx]);
+      while (stack.length && stack[stack.length - 1].depth >= depth) stack.pop();
+      stack.push({ depth: depth, index: idx });
+    });
+    return { items: items, links: links };
+  }
+
+  // 親から子へ右へ伸びるツリー配置（メモの階層をそのまま図にする）
+  function treeLayout(items, links) {
+    var n = items.length, i;
+    var children = [], parent = new Array(n).fill(-1);
+    for (i = 0; i < n; i++) children.push([]);
+    links.forEach(function (l) {
+      if (l[0] >= 0 && l[0] < n && l[1] >= 0 && l[1] < n && l[0] !== l[1]) {
+        children[l[0]].push(l[1]); parent[l[1]] = l[0];
+      }
+    });
+    var roots = [];
+    for (i = 0; i < n; i++) if (parent[i] < 0) roots.push(i);
+
+    var depth = new Array(n).fill(0);
+    var q = roots.slice();
+    while (q.length) {
+      var c = q.shift();
+      children[c].forEach(function (k) { depth[k] = depth[c] + 1; q.push(k); });
+    }
+
+    var y = new Array(n).fill(0), cursor = 0;
+    function walk(id) {
+      if (!children[id].length) { y[id] = cursor; cursor += 1; return; }
+      children[id].forEach(walk);
+      y[id] = (y[children[id][0]] + y[children[id][children[id].length - 1]]) / 2;
+    }
+    roots.forEach(function (r) { walk(r); cursor += 0.6; });
+
+    var colGap = 320, rowGap = 168, out = [];
+    for (i = 0; i < n; i++) out.push({ x: depth[i] * colGap, y: y[i] * rowGap });
+    return out;
+  }
+
+  function memoToChips() {
+    var text = memoEl.value;
+    if (!text.trim()) { toast("メモが空です"); return; }
+    var parsed = parseMemoLines(text);
+    var items = parsed.items, links = parsed.links;
+    if (!items.length) { toast("チップにできる行がありません"); return; }
+
+    var raw = treeLayout(items, links);
+    var nxMin = Infinity, nxMax = -Infinity, nyMin = Infinity, nyMax = -Infinity;
+    raw.forEach(function (p) {
+      if (p.x < nxMin) nxMin = p.x;
+      if (p.x > nxMax) nxMax = p.x;
+      if (p.y < nyMin) nyMin = p.y;
+      if (p.y > nyMax) nyMax = p.y;
+    });
+
+    var ox, oy;
+    if (state.nodes.length) {
+      var exMaxX = -Infinity, eyMin = Infinity, eyMax = -Infinity;
+      state.nodes.forEach(function (nn) {
+        if (nn.x > exMaxX) exMaxX = nn.x;
+        if (nn.y < eyMin) eyMin = nn.y;
+        if (nn.y > eyMax) eyMax = nn.y;
+      });
+      ox = (exMaxX + 380) - nxMin;
+      oy = ((eyMin + eyMax) / 2) - ((nyMin + nyMax) / 2);
+    } else {
+      ox = (WORLD_W / 2) - ((nxMin + nxMax) / 2);
+      oy = (WORLD_H / 2) - ((nyMin + nyMax) / 2);
+    }
+
+    var idMap = [], created = [];
+    items.forEach(function (it, i) {
+      var isRoot = true;
+      for (var li = 0; li < links.length; li++) {
+        if (links[li][1] === i) { isRoot = false; break; }
+      }
+      var node = {
+        id: nextId(),
+        x: Math.round(raw[i].x + ox),
+        y: Math.round(raw[i].y + oy),
+        text: it.text,
+        scale: 2,
+        color: isRoot ? "blue" : "plain"
+      };
+      state.nodes.push(node);
+      idMap.push(node.id);
+      created.push(node.id);
+    });
+    links.forEach(function (l) {
+      if (idMap[l[0]] && idMap[l[1]]) state.links.push([idMap[l[0]], idMap[l[1]]]);
+    });
+
+    state.selected = created.length ? created[0] : null;
+    save();
+    refresh();
+    requestAnimationFrame(fitView);
+    toast("メモから " + created.length + " 個のチップを作成しました");
+  }
+
+  /* ============ memo ============ */
+  function updateCount() { memoCount.textContent = memoEl.value.length + "文字"; }
+  var memoTimer = null;
+  memoEl.addEventListener("input", function () {
+    updateCount();
+    if (memoTimer) clearTimeout(memoTimer);
+    memoTimer = setTimeout(saveMemo, 400);
+  });
+  btnMemoToChips.addEventListener("click", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    memoToChips();
+  });
+
+  btnClearMemo.addEventListener("click", function () {
+    if (!memoEl.value) return;
+    if (!window.confirm("メモを消去します。よろしいですか？")) return;
+    memoEl.value = ""; updateCount(); saveMemo(); memoEl.focus();
+  });
+
+  /* ============ save / load (file) ============ */
+  function buildData() {
+    return {
+      app: "思考整理ボード", version: SIZE_SCALE_VERSION, savedAt: new Date().toISOString(),
+      ratio: ratio, memo: memoEl.value, nodes: state.nodes, links: state.links
+    };
+  }
+
+  document.getElementById("btnSave").addEventListener("click", function () {
+    save(); saveMemo(); saveRatio();
+    var blob = new Blob([JSON.stringify(buildData(), null, 2)], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "思考整理ボード_" + stamp() + ".json";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+    toast("保存ファイルを書き出しました");
+  });
+
+  document.getElementById("btnLoad").addEventListener("click", function () { fileInput.click(); });
+
+  fileInput.addEventListener("change", function () {
+    var f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var data = parseImport(String(reader.result));
+        applyImport(data);
+        toast("読み込みました");
+      } catch (err) { toast("ファイルを読み込めませんでした"); }
+      fileInput.value = "";
+    };
+    reader.onerror = function () { toast("ファイルを読み込めませんでした"); fileInput.value = ""; };
+    reader.readAsText(f);
+  });
+
+  function applyImport(data) {
+    if (!data || !Array.isArray(data.nodes) || !data.nodes.length) throw new Error("invalid");
+    var nodes = data.nodes.map(normalizeNode).filter(Boolean);
+    var ids = {}; nodes.forEach(function (n) { ids[n.id] = 1; });
+    var links = (Array.isArray(data.links) ? data.links : [])
+      .filter(function (l) { return Array.isArray(l) && l.length >= 2 && ids[l[0]] && ids[l[1]] && l[0] !== l[1]; })
+      .map(function (l) { return [String(l[0]), String(l[1])]; });
+
+    state.nodes = nodes;
+    state.links = links;
+    state.selected = nodes.length ? nodes[0].id : null;
+
+    if (typeof data.memo === "string") { memoEl.value = data.memo; updateCount(); saveMemo(); }
+    if (typeof data.ratio === "number" && isFinite(data.ratio)) {
+      ratio = Math.max(0.28, Math.min(0.78, data.ratio)); applyRatio();
+    }
+    save(); setTab("memo"); refresh();
+    requestAnimationFrame(fitView);
+  }
+
+  /* ============ reset ============ */
+  document.getElementById("btnResetAll").addEventListener("click", function () {
+    if (!window.confirm("マインドマップを初期状態に戻します。メモは残ります。よろしいですか？")) return;
+    state = defaultState();
+    view = { panX: 0, panY: 0, scale: 1 };
+    save(); setTab("memo"); refresh();
+    requestAnimationFrame(fitView);
+    toast("初期化しました");
+  });
+
+  /* ============ divider ============ */
+  function applyRatio() {
+    var avail = app.clientHeight - topbar.offsetHeight - divider.offsetHeight;
+    if (avail < 200) avail = 200;
+    var mapH = Math.round(avail * ratio);
+    mapWrap.style.height = mapH + "px";
+    panelWrap.style.height = (avail - mapH) + "px";
+  }
+  divider.addEventListener("pointerdown", function (e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    var r0 = app.getBoundingClientRect();
+    var avail = app.clientHeight - topbar.offsetHeight - divider.offsetHeight;
+    if (avail < 200) avail = 200;
+    try { divider.setPointerCapture(e.pointerId); } catch (err) {}
+    divider.classList.add("is-active");
+    function onMove(ev) {
+      var y = ev.clientY - r0.top - topbar.offsetHeight;
+      ratio = Math.max(0.28, Math.min(0.78, y / avail));
+      applyRatio();
+    }
+    function onUp() {
+      divider.removeEventListener("pointermove", onMove);
+      divider.removeEventListener("pointerup", onUp);
+      divider.removeEventListener("pointercancel", onUp);
+      try { divider.releasePointerCapture(e.pointerId); } catch (err) {}
+      divider.classList.remove("is-active");
+      saveRatio();
+      requestAnimationFrame(fitView);
+    }
+    divider.addEventListener("pointermove", onMove);
+    divider.addEventListener("pointerup", onUp);
+    divider.addEventListener("pointercancel", onUp);
+  });
+
+  /* ============ resize ============ */
+  var resizeTimer = null;
+  window.addEventListener("resize", function () {
+    applyRatio();
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(fitView, 200);
+  });
+
+  /* ============ init ============ */
+  loadLocal();
+  try { memoEl.value = localStorage.getItem(KEY_MEMO) || ""; } catch (e) { memoEl.value = ""; }
+  updateCount();
+  document.body.classList.toggle("show-num", showNum);
+  numToggle.classList.toggle("is-active", showNum);
+  setTab("memo");
+  applyRatio();
+  refresh();
+  requestAnimationFrame(function () { applyRatio(); fitView(); updateAiOutput(); });
+})();
+</script>
+</body>
+</html>

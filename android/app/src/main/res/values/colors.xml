@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- HTML 側の --paper / --ink と揃えている -->
+    <color name="paper">#FFE9EDEE</color>
+    <color name="ink">#FF16212C</color>
+</resources>
