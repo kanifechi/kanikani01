@@ -46,6 +46,15 @@ jobs:
           ls -l dist/shikoboard.apk
           sha256sum dist/shikoboard.apk
 
+      # 署名・パッケージ名・同梱物が意図どおりかをビルドのたびに確かめる
+      - name: Verify APK
+        run: |
+          set -euo pipefail
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          "$BUILD_TOOLS/apksigner" verify --print-certs --verbose dist/shikoboard.apk
+          "$BUILD_TOOLS/aapt2" dump badging dist/shikoboard.apk | head -20
+          unzip -l dist/shikoboard.apk | grep -E 'assets/www/index\.html|res/raw/download_hook'
+
       - uses: actions/upload-artifact@v4
         with:
           name: shikoboard-apk

@@ -61,6 +61,9 @@ cd android
 
 - 見出しフォント（Zen Kaku Gothic New / Space Mono）は Google Fonts から読み込んでいます。
   オフラインでは端末内蔵のゴシック体になりますが、動作には影響しません。
+- HTML が `color-mix(in oklab, ...)` と `100dvh` を使っているため、**Android System WebView**
+  が Chrome 111 相当より古いと配色やレイアウトが崩れます。Play ストアで
+  「Android System WebView」を更新しておいてください（Chrome で同じ HTML が正しく表示できていれば大丈夫）。
 - 端末の「文字サイズ」設定を大きくしていると、レイアウトが窮屈になることがあります。
   HTML と同じ見た目に固定したい場合は `MainActivity.java` の WebView 設定に
   `settings.setTextZoom(100);` を足してください。
