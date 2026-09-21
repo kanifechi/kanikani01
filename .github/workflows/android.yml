@@ -52,8 +52,19 @@ jobs:
           set -euo pipefail
           BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
           "$BUILD_TOOLS/apksigner" verify --print-certs --verbose dist/shikoboard.apk
-          "$BUILD_TOOLS/aapt2" dump badging dist/shikoboard.apk | head -20
-          unzip -l dist/shikoboard.apk | grep -E 'assets/www/index\.html|res/raw/download_hook'
+          "$BUILD_TOOLS/aapt2" dump badging dist/shikoboard.apk | head -4
+
+          # HTML が改変されず入っているか（ソースとハッシュが一致するか）
+          unzip -p dist/shikoboard.apk assets/www/index.html | sha256sum | cut -d' ' -f1 > /tmp/in-apk.sha
+          sha256sum android/app/src/main/assets/www/index.html | cut -d' ' -f1 > /tmp/in-src.sha
+          diff /tmp/in-apk.sha /tmp/in-src.sha
+          echo "bundled HTML matches source: $(cat /tmp/in-apk.sha)"
+
+          # release ビルドは res/raw/*.js のパスを短縮するので、名前ではなく中身で確かめる
+          JS_ENTRY="$(unzip -l dist/shikoboard.apk | awk '{print $4}' | grep -E '^res/.*\.js$' | head -1)"
+          test -n "$JS_ENTRY"
+          unzip -p dist/shikoboard.apk "$JS_ENTRY" | grep -q '__androidDownloadHookInstalled'
+          echo "download hook present at $JS_ENTRY"
 
       - uses: actions/upload-artifact@v4
         with:
