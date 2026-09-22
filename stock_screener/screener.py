@@ -62,6 +62,11 @@ LABEL_SELL = "売り候補"
 LABEL_HOLD = "様子見"
 LABEL_NO_DATA = "判定不可"
 
+# --- 取引時間の扱い ---
+JST = dt.timezone(dt.timedelta(hours=9), "JST")
+MARKET_CLOSE_JST = dt.time(15, 30)     # 東証の大引け
+EXCLUDE_INCOMPLETE_SESSION = True      # True: 大引け前は「当日の途中経過」を判定に使わない
+
 # --- データ取得 ---
 HISTORY_ROWS = 90          # 指標計算に使う日足の本数（営業日ベース）
 FETCH_PERIOD = "1y"        # yfinance に渡す取得期間（上記本数を確保するための余裕込み）
@@ -206,7 +211,7 @@ class YFinanceSource:
             ),
             is_valid=lambda f: f is not None and len(f) > 0,
         )
-        return bars_from_dataframe(frame, until=until)
+        return drop_incomplete_session(bars_from_dataframe(frame, until=until))
 
     # ---- 銘柄情報・バリュエーション ---------------------------------------
 
@@ -285,6 +290,25 @@ def bars_from_dataframe(frame: Any, until: Optional[dt.date] = None) -> list[Bar
             volume=_to_float(row.get("Volume")),
         ))
     bars.sort(key=lambda b: b.date)
+    return bars
+
+
+def drop_incomplete_session(bars: list[Bar], now_jst: Optional[dt.datetime] = None,
+                           enabled: bool = EXCLUDE_INCOMPLETE_SESSION) -> list[Bar]:
+    """大引け前に取得した「当日の途中経過」の足を落とす。
+
+    ザラ場中の当日足は、出来高がまだ一日分に達しておらず、終値も確定していない。
+    そのまま使うと出来高比率が実態より小さく出て、買い候補を取りこぼす
+    （寄り付き直後に実行すると全銘柄が 0.2 倍前後になる）。
+    大引け後であれば当日足は確定値なのでそのまま使う。
+    """
+    if not enabled or not bars:
+        return bars
+    now = now_jst or dt.datetime.now(JST)
+    if now.time() >= MARKET_CLOSE_JST:
+        return bars
+    if bars[-1].date == now.date().isoformat():
+        return bars[:-1]
     return bars
 
 
