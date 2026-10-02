@@ -257,6 +257,51 @@ class TestBarsFromDataFrame(unittest.TestCase):
         self.assertEqual(sc.bars_from_dataframe(self.frame([])), [])
 
 
+class TestDropIncompleteSession(unittest.TestCase):
+    """ザラ場中の「当日の途中経過」を判定に使わないための処理。"""
+
+    @staticmethod
+    def bars(dates):
+        return [sc.Bar(date=d, open=100.0, close=100.0, volume=1000.0) for d in dates]
+
+    @staticmethod
+    def jst(y, m, d, hh, mm):
+        import datetime as dt
+        return dt.datetime(y, m, d, hh, mm, tzinfo=sc.JST)
+
+    def test_drops_todays_bar_during_trading_hours(self):
+        bars = self.bars(["2026-09-17", "2026-09-18"])
+        kept = sc.drop_incomplete_session(bars, now_jst=self.jst(2026, 9, 18, 9, 47))
+        self.assertEqual([b.date for b in kept], ["2026-09-17"])
+
+    def test_drops_todays_bar_before_market_open(self):
+        # 朝8時の自動実行でも、当日足が返ってきた場合は使わない
+        bars = self.bars(["2026-09-17", "2026-09-18"])
+        kept = sc.drop_incomplete_session(bars, now_jst=self.jst(2026, 9, 18, 8, 0))
+        self.assertEqual([b.date for b in kept], ["2026-09-17"])
+
+    def test_keeps_todays_bar_after_market_close(self):
+        # 大引け後の当日足は確定値なのでそのまま使う
+        bars = self.bars(["2026-09-17", "2026-09-18"])
+        kept = sc.drop_incomplete_session(bars, now_jst=self.jst(2026, 9, 18, 15, 30))
+        self.assertEqual([b.date for b in kept], ["2026-09-17", "2026-09-18"])
+
+    def test_keeps_bars_when_latest_is_not_today(self):
+        # 休日や休場明けなど、最新足が前営業日ならそのまま
+        bars = self.bars(["2026-09-17", "2026-09-18"])
+        kept = sc.drop_incomplete_session(bars, now_jst=self.jst(2026, 9, 19, 10, 0))
+        self.assertEqual([b.date for b in kept], ["2026-09-17", "2026-09-18"])
+
+    def test_can_be_disabled(self):
+        bars = self.bars(["2026-09-17", "2026-09-18"])
+        kept = sc.drop_incomplete_session(bars, now_jst=self.jst(2026, 9, 18, 9, 47),
+                                          enabled=False)
+        self.assertEqual(len(kept), 2)
+
+    def test_empty_list(self):
+        self.assertEqual(sc.drop_incomplete_session([]), [])
+
+
 class TestTicker(unittest.TestCase):
     def test_to_ticker(self):
         self.assertEqual(sc.to_ticker("7203"), "7203.T")
