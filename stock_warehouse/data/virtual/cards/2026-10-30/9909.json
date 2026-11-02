@@ -1,0 +1,188 @@
+{
+ "schema_version": "1.0",
+ "code": "9909",
+ "name": "架空銘柄09",
+ "kind": "stock",
+ "as_of": "2026-10-30",
+ "source": "virtual",
+ "data": {
+  "first_date": "2024-11-01",
+  "sessions": 485,
+  "no_trade_today": false,
+  "last_split_date": null,
+  "notes": []
+ },
+ "latest": {
+  "date": "2026-10-30",
+  "open": 3651.0,
+  "high": 3697.0,
+  "low": 3645.0,
+  "close": 3695.0,
+  "volume": 1435900,
+  "change_pct": 1.59,
+  "ma5": {
+   "value": 3631.2,
+   "close_vs_pct": 1.76,
+   "above": true
+  },
+  "ma25": {
+   "value": 3753.92,
+   "close_vs_pct": -1.57,
+   "above": false
+  },
+  "ma75": {
+   "value": 3819.96,
+   "close_vs_pct": -3.27,
+   "above": false
+  },
+  "ma200": {
+   "value": 3964.02,
+   "close_vs_pct": -6.79,
+   "above": false
+  },
+  "ma_alignment": "bear",
+  "volume_ratio20": 0.54,
+  "high20_prev": 3887.0,
+  "low20_prev": 3543.0,
+  "new_high20": false,
+  "new_low20": false,
+  "atr14": 80.38,
+  "atr14_pct": 2.18,
+  "limit_up": false,
+  "limit_down": false,
+  "limit_up_touched": false,
+  "limit_down_touched": false
+ },
+ "recent": [
+  {
+   "date": "2026-10-19",
+   "close": 3663.0,
+   "change_pct": 1.24,
+   "volume_ratio20": 1.11,
+   "no_trade": false,
+   "limit_up": false,
+   "limit_down": false,
+   "new_high20": false,
+   "new_low20": true
+  },
+  {
+   "date": "2026-10-20",
+   "close": 3663.0,
+   "change_pct": 0.0,
+   "volume_ratio20": 1.05,
+   "no_trade": false,
+   "limit_up": false,
+   "limit_down": false,
+   "new_high20": false,
+   "new_low20": false
+  },
+  {
+   "date": "2026-10-21",
+   "close": 3718.0,
+   "change_pct": 1.5,
+   "volume_ratio20": 1.27,
+   "no_trade": false,
+   "limit_up": false,
+   "limit_down": false,
+   "new_high20": false,
+   "new_low20": false
+  },
+  {
+   "date": "2026-10-22",
+   "close": 3671.0,
+   "change_pct": -1.26,
+   "volume_ratio20": 0.54,
+   "no_trade": false,
+   "limit_up": false,
+   "limit_down": false,
+   "new_high20": false,
+   "new_low20": false
+  },
+  {
+   "date": "2026-10-23",
+   "close": 3637.0,
+   "change_pct": -0.93,
+   "volume_ratio20": 0.99,
+   "no_trade": false,
+   "limit_up": false,
+   "limit_down": false,
+   "new_high20": false,
+   "new_low20": false
+  },
+  {
+   "date": "2026-10-26",
+   "close": 3595.0,
+   "change_pct": -1.15,
+   "volume_ratio20": 1.16,
+   "no_trade": false,
+   "limit_up": false,
+   "limit_down": false,
+   "new_high20": false,
+   "new_low20": true
+  },
+  {
+   "date": "2026-10-27",
+   "close": 3582.0,
+   "change_pct": -0.36,
+   "volume_ratio20": 0.82,
+   "no_trade": false,
+   "limit_up": false,
+   "limit_down": false,
+   "new_high20": false,
+   "new_low20": false
+  },
+  {
+   "date": "2026-10-28",
+   "close": 3647.0,
+   "change_pct": 1.81,
+   "volume_ratio20": 0.47,
+   "no_trade": false,
+   "limit_up": false,
+   "limit_down": false,
+   "new_high20": false,
+   "new_low20": true
+  },
+  {
+   "date": "2026-10-29",
+   "close": 3637.0,
+   "change_pct": -0.27,
+   "volume_ratio20": 1.22,
+   "no_trade": false,
+   "limit_up": false,
+   "limit_down": false,
+   "new_high20": false,
+   "new_low20": false
+  },
+  {
+   "date": "2026-10-30",
+   "close": 3695.0,
+   "change_pct": 1.59,
+   "volume_ratio20": 0.54,
+   "no_trade": false,
+   "limit_up": false,
+   "limit_down": false,
+   "new_high20": false,
+   "new_low20": false
+  }
+ ],
+ "trend": {
+  "change_5d_pct": 1.59,
+  "change_20d_pct": -3.55,
+  "ma25_slope_5d_pct": -1.38,
+  "up_days_5": 2,
+  "down_days_5": 3,
+  "limit_up_days_20": 0,
+  "limit_down_days_20": 0,
+  "new_high20_days_20": 0,
+  "new_low20_days_20": 6
+ },
+ "market": {
+  "code": "9999",
+  "date": "2026-10-30",
+  "change_pct": 1.54,
+  "change_5d_pct": 2.69,
+  "close_vs_ma25_pct": 1.88,
+  "close_vs_ma200_pct": 5.89,
+  "ma_alignment": "bull"
+ }
+}

@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kanifechi/kanikani01/stock_warehouse/card.schema.json",
+  "title": "判定用カード（1銘柄1枚）",
+  "description": "2段目の要点（最新日の値と直近の流れ）。latest は基準日まででいちばん新しい取引成立日の値。価格はすべて分割調整後（最新日はその日の実際の値段と同じ）。データが足りない値は null。UTF-8 で 8192 バイト以下。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "code", "name", "kind", "as_of", "source", "data", "latest", "recent", "trend", "market"],
+  "$defs": {
+    "num": {"type": ["number", "null"]},
+    "int": {"type": ["integer", "null"]},
+    "flag": {"type": ["boolean", "null"]},
+    "date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "date_or_null": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "ma_position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "close_vs_pct", "above"],
+      "properties": {
+        "value": {"$ref": "#/$defs/num", "description": "移動平均（成立日N日）"},
+        "close_vs_pct": {"$ref": "#/$defs/num", "description": "終値が移動平均から何%離れているか"},
+        "above": {"$ref": "#/$defs/flag", "description": "終値が移動平均より上なら true"}
+      }
+    }
+  },
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "code": {"type": "string", "minLength": 1, "maxLength": 12},
+    "name": {"type": "string", "maxLength": 64},
+    "kind": {"enum": ["stock", "index"]},
+    "as_of": {"$ref": "#/$defs/date", "description": "このカードの基準日"},
+    "source": {"type": "string", "maxLength": 32, "description": "データの取り口の名前（virtual / csv / ...）"},
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["first_date", "sessions", "no_trade_today", "last_split_date", "notes"],
+      "properties": {
+        "first_date": {"$ref": "#/$defs/date", "description": "手元にある最初のデータの日"},
+        "sessions": {"type": "integer", "minimum": 0, "description": "基準日までの取引成立日数"},
+        "no_trade_today": {"type": "boolean", "description": "基準日が取引不成立（出来高0）なら true"},
+        "last_split_date": {"$ref": "#/$defs/date_or_null", "description": "直近の株式分割の効力発生日"},
+        "notes": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 120},
+                  "description": "データの欠け・注意点（なぜ null なのか等）"}
+      }
+    },
+    "latest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["date", "open", "high", "low", "close", "volume", "change_pct",
+                   "ma5", "ma25", "ma75", "ma200", "ma_alignment",
+                   "volume_ratio20", "high20_prev", "low20_prev", "new_high20", "new_low20",
+                   "atr14", "atr14_pct", "limit_up", "limit_down", "limit_up_touched", "limit_down_touched"],
+      "properties": {
+        "date": {"$ref": "#/$defs/date", "description": "最後に取引が成立した日（no_trade_today なら as_of より前）"},
+        "open": {"$ref": "#/$defs/num"},
+        "high": {"$ref": "#/$defs/num"},
+        "low": {"$ref": "#/$defs/num"},
+        "close": {"$ref": "#/$defs/num"},
+        "volume": {"$ref": "#/$defs/int", "description": "latest.date の出来高（分割調整後の株数）"},
+        "change_pct": {"$ref": "#/$defs/num", "description": "前の成立日の終値からの変化率(%)"},
+        "ma5": {"$ref": "#/$defs/ma_position"},
+        "ma25": {"$ref": "#/$defs/ma_position"},
+        "ma75": {"$ref": "#/$defs/ma_position"},
+        "ma200": {"$ref": "#/$defs/ma_position"},
+        "ma_alignment": {"enum": ["bull", "bear", "mixed", null], "description": "bull: 5>25>75 / bear: 5<25<75"},
+        "volume_ratio20": {"$ref": "#/$defs/num", "description": "latest.date の出来高 ÷ その前日までの20日平均（取引不成立の日も0として数える）"},
+        "high20_prev": {"$ref": "#/$defs/num", "description": "前日までの20成立日の最高値"},
+        "low20_prev": {"$ref": "#/$defs/num", "description": "前日までの20成立日の最安値"},
+        "new_high20": {"$ref": "#/$defs/flag", "description": "高値が high20_prev を上回った"},
+        "new_low20": {"$ref": "#/$defs/flag", "description": "安値が low20_prev を下回った"},
+        "atr14": {"$ref": "#/$defs/num", "description": "ATR 14日（ワイルダー方式）"},
+        "atr14_pct": {"$ref": "#/$defs/num", "description": "ATR ÷ 終値 (%)"},
+        "limit_up": {"$ref": "#/$defs/flag", "description": "ストップ高で引けた"},
+        "limit_down": {"$ref": "#/$defs/flag", "description": "ストップ安で引けた"},
+        "limit_up_touched": {"$ref": "#/$defs/flag", "description": "高値がストップ高に届いた"},
+        "limit_down_touched": {"$ref": "#/$defs/flag", "description": "安値がストップ安に届いた"}
+      }
+    },
+    "recent": {
+      "type": "array",
+      "description": "直近の日（古い順、基準日を含む最大10日。取引不成立の日も含む）",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["date", "close", "change_pct", "volume_ratio20", "no_trade", "limit_up", "limit_down", "new_high20", "new_low20"],
+        "properties": {
+          "date": {"$ref": "#/$defs/date"},
+          "close": {"$ref": "#/$defs/num"},
+          "change_pct": {"$ref": "#/$defs/num"},
+          "volume_ratio20": {"$ref": "#/$defs/num"},
+          "no_trade": {"type": "boolean"},
+          "limit_up": {"$ref": "#/$defs/flag"},
+          "limit_down": {"$ref": "#/$defs/flag"},
+          "new_high20": {"$ref": "#/$defs/flag"},
+          "new_low20": {"$ref": "#/$defs/flag"}
+        }
+      }
+    },
+    "trend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change_5d_pct", "change_20d_pct", "ma25_slope_5d_pct", "up_days_5", "down_days_5",
+                   "limit_up_days_20", "limit_down_days_20", "new_high20_days_20", "new_low20_days_20"],
+      "properties": {
+        "change_5d_pct": {"$ref": "#/$defs/num", "description": "5成立日前の終値からの変化率(%)"},
+        "change_20d_pct": {"$ref": "#/$defs/num", "description": "20成立日前の終値からの変化率(%)"},
+        "ma25_slope_5d_pct": {"$ref": "#/$defs/num", "description": "25日線の5成立日前からの変化率(%)"},
+        "up_days_5": {"$ref": "#/$defs/int", "description": "直近5成立日のうち上がった日数"},
+        "down_days_5": {"$ref": "#/$defs/int", "description": "直近5成立日のうち下がった日数"},
+        "limit_up_days_20": {"$ref": "#/$defs/int", "description": "直近20成立日のストップ高（引け）日数"},
+        "limit_down_days_20": {"$ref": "#/$defs/int", "description": "直近20成立日のストップ安（引け）日数"},
+        "new_high20_days_20": {"$ref": "#/$defs/int", "description": "直近20成立日の20日高値更新の日数"},
+        "new_low20_days_20": {"$ref": "#/$defs/int", "description": "直近20成立日の20日安値更新の日数"}
+      }
+    },
+    "market": {
+      "description": "同じ日の市場全体の指標（指標そのもののカード、または指標が無いときは null）",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "date", "change_pct", "change_5d_pct", "close_vs_ma25_pct", "close_vs_ma200_pct", "ma_alignment"],
+          "properties": {
+            "code": {"type": "string"},
+            "date": {"$ref": "#/$defs/date_or_null"},
+            "change_pct": {"$ref": "#/$defs/num"},
+            "change_5d_pct": {"$ref": "#/$defs/num"},
+            "close_vs_ma25_pct": {"$ref": "#/$defs/num"},
+            "close_vs_ma200_pct": {"$ref": "#/$defs/num"},
+            "ma_alignment": {"enum": ["bull", "bear", "mixed", null]}
+          }
+        }
+      ]
+    }
+  }
+}
